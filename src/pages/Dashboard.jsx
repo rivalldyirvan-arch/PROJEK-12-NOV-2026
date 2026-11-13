@@ -67,7 +67,7 @@ export default function Dashboard({
           <div>
             <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-semibold mb-2 border border-emerald-500/30">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              Sistem Keuangan & Perpajakan Terintegrasi
+              Sistem Keuangan & Perpajakan Terintegrasi v1
             </div>
             <h2 className="text-2xl font-bold tracking-tight">Ringkasan Eksekutif Keuangan</h2>
             <p className="text-sm text-slate-300 mt-1 max-w-2xl">
