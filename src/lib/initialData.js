@@ -6,6 +6,7 @@
 export const INITIAL_COA = [
   // 1. ASET
   { id: '1101', code: '1101', name: 'Kas Kecil (Petty Cash)', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 15000000, isActive: true },
+  { id: '1104', code: '1104', name: 'Kas Besar (Main Cash)', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 45000000, isActive: true },
   { id: '1102', code: '1102', name: 'Bank BCA Operasional', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 350000000, isActive: true },
   { id: '1103', code: '1103', name: 'Bank Mandiri Payroll & Tax', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 185000000, isActive: true },
   { id: '1120', code: '1120', name: 'Piutang Usaha (Accounts Receivable)', category: 'Asset', subCategory: 'Piutang', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 75000000, isActive: true },

@@ -9,6 +9,9 @@ import VendorModule from './pages/VendorModule';
 import PurchaseModule from './pages/PurchaseModule';
 import TaxModule from './pages/TaxModule';
 import TaxCalculatorTab from './pages/TaxCalculatorTab';
+import UserModule from './pages/UserModule';
+import LoginPage from './pages/LoginPage';
+import { AuthProvider, useAuth } from './lib/authContext';
 import { 
   fetchCOA, 
   fetchVendors, 
@@ -17,11 +20,12 @@ import {
   testSupabaseConnection 
 } from './lib/databaseService';
 
-export default function App() {
+function MainAppContent() {
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [isSupabaseActive, setIsSupabaseActive] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
 
   // Core Data Lists
@@ -34,9 +38,11 @@ export default function App() {
     setToast({ message, type });
   };
 
-  // Refresh and load all data
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  // Refresh and load all data (silent by default on refresh to prevent unmounting modals)
+  const loadData = useCallback(async (isInitial = false) => {
+    if (isInitial) {
+      setLoading(true);
+    }
     try {
       const [coa, vendors, purchases, taxes, conn] = await Promise.all([
         fetchCOA(),
@@ -55,13 +61,33 @@ export default function App() {
       console.error('Error loading data:', err);
       showToast('Gagal memuat data keuangan', 'error');
     } finally {
-      setLoading(false);
+      if (isInitial) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (isAuthenticated) {
+      loadData(true);
+    }
+  }, [isAuthenticated, loadData]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-9 h-9 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-xs font-semibold text-slate-400">Menyiapkan autentikasi...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If not logged in, show Login Page!
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
 
   // Sidebar stats
   const stats = {
@@ -106,6 +132,8 @@ export default function App() {
                   purchaseRequests={purchaseRequests}
                   taxRecords={taxRecords}
                   onNavigate={setActiveTab}
+                  onRefresh={loadData}
+                  showToast={showToast}
                 />
               )}
 
@@ -149,6 +177,10 @@ export default function App() {
               {activeTab === 'tax-calculator' && (
                 <TaxCalculatorTab />
               )}
+
+              {activeTab === 'users' && (
+                <UserModule showToast={showToast} />
+              )}
             </>
           )}
         </main>
@@ -164,5 +196,13 @@ export default function App() {
       {/* Toast Alert */}
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <MainAppContent />
+    </AuthProvider>
   );
 }

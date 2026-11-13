@@ -1,10 +1,16 @@
 import { getSupabase } from './supabase';
+import { INITIAL_USERS, INITIAL_ROLES } from './initialUsers';
 
 const STORAGE_KEYS = {
   COA: 'app_coa_data',
   VENDORS: 'app_vendors_data',
   PURCHASES: 'app_purchases_data',
-  TAX: 'app_tax_data'
+  TAX: 'app_tax_data',
+  USERS: 'app_users_data',
+  ROLES: 'app_roles_data',
+  VENDOR_DEPOSITS: 'app_vendor_deposits_data',
+  PAYMENT_TRANSACTIONS: 'app_payment_transactions_data',
+  PURCHASES_PAYMENTS: 'app_purchases_payments_data'
 };
 
 // Local storage helpers (only for offline / demo mode)
@@ -253,38 +259,47 @@ export async function deleteVendor(id) {
 // ==============================================================================
 export async function fetchPurchaseRequests() {
   const supabase = getSupabase();
+  const paymentMeta = getLocal(STORAGE_KEYS.PURCHASES_PAYMENTS, {});
+
   if (supabase) {
     try {
       const { data, error } = await supabase.from('purchase_requests').select('*').order('request_date', { ascending: false });
       if (!error && data) {
-        return data.map(item => ({
-          id: item.id,
-          requestNumber: item.request_number,
-          requestDate: item.request_date,
-          dueDate: item.due_date,
-          requesterName: item.requester_name,
-          department: item.department,
-          vendorId: item.vendor_id,
-          vendorName: item.vendor_name,
-          title: item.title,
-          description: item.description,
-          subtotal: Number(item.subtotal || 0),
-          discount: Number(item.discount || 0),
-          dpp: Number(item.dpp || 0),
-          ppnRate: Number(item.ppn_rate || 0),
-          ppnAmount: Number(item.ppn_amount || 0),
-          pphType: item.pph_type,
-          pphRate: Number(item.pph_rate || 0),
-          pphAmount: Number(item.pph_amount || 0),
-          totalPayable: Number(item.total_payable || 0),
-          grandTotal: Number(item.grand_total || 0),
-          status: item.status,
-          approvalDate: item.approval_date,
-          approvedBy: item.approved_by,
-          coaDebitAccount: item.coa_debit_account,
-          coaCreditAccount: item.coa_credit_account,
-          items: item.items || []
-        }));
+        return data.map(item => {
+          const meta = paymentMeta[item.id] || paymentMeta[item.request_number] || {};
+          const origPayable = Number(item.total_payable || 0);
+          return {
+            id: item.id,
+            requestNumber: item.request_number,
+            requestDate: item.request_date,
+            dueDate: item.due_date,
+            requesterName: item.requester_name,
+            department: item.department,
+            vendorId: item.vendor_id,
+            vendorName: item.vendor_name,
+            title: item.title,
+            description: item.description,
+            subtotal: Number(item.subtotal || 0),
+            discount: Number(item.discount || 0),
+            dpp: Number(item.dpp || 0),
+            ppnRate: Number(item.ppn_rate || 0),
+            ppnAmount: Number(item.ppn_amount || 0),
+            pphType: item.pph_type,
+            pphRate: Number(item.pph_rate || 0),
+            pphAmount: Number(item.pph_amount || 0),
+            totalPayable: origPayable,
+            remainingPayable: meta.remainingPayable !== undefined ? Number(meta.remainingPayable) : (item.status === 'Lunas' ? 0 : origPayable),
+            paidAmount: meta.paidAmount !== undefined ? Number(meta.paidAmount) : (item.status === 'Lunas' ? origPayable : 0),
+            paymentHistory: meta.paymentHistory || [],
+            grandTotal: Number(item.grand_total || 0),
+            status: item.status,
+            approvalDate: item.approval_date,
+            approvedBy: item.approved_by,
+            coaDebitAccount: item.coa_debit_account,
+            coaCreditAccount: item.coa_credit_account,
+            items: item.items || []
+          };
+        });
       }
       if (error) console.error('Supabase fetch purchase requests error:', error.message);
     } catch (err) {
@@ -292,13 +307,37 @@ export async function fetchPurchaseRequests() {
     }
   }
 
-  return getLocal(STORAGE_KEYS.PURCHASES, []);
+  const localList = getLocal(STORAGE_KEYS.PURCHASES, []);
+  return localList.map(item => {
+    const meta = paymentMeta[item.id] || paymentMeta[item.requestNumber] || {};
+    const origPayable = Number(item.totalPayable || 0);
+    return {
+      ...item,
+      remainingPayable: meta.remainingPayable !== undefined ? Number(meta.remainingPayable) : (item.status === 'Lunas' ? 0 : origPayable),
+      paidAmount: meta.paidAmount !== undefined ? Number(meta.paidAmount) : (item.status === 'Lunas' ? origPayable : 0),
+      paymentHistory: meta.paymentHistory || item.paymentHistory || []
+    };
+  });
 }
 
 export async function savePurchaseRequest(pr) {
   const supabase = getSupabase();
   const id = pr.id || `pr-${Date.now()}`;
   const newPR = { ...pr, id };
+
+  // Save payment metadata if present
+  if (newPR.remainingPayable !== undefined || newPR.paymentHistory) {
+    const paymentMeta = getLocal(STORAGE_KEYS.PURCHASES_PAYMENTS, {});
+    paymentMeta[newPR.id] = {
+      remainingPayable: newPR.remainingPayable,
+      paidAmount: newPR.paidAmount,
+      paymentHistory: newPR.paymentHistory || []
+    };
+    if (newPR.requestNumber) {
+      paymentMeta[newPR.requestNumber] = paymentMeta[newPR.id];
+    }
+    setLocal(STORAGE_KEYS.PURCHASES_PAYMENTS, paymentMeta);
+  }
 
   if (supabase) {
     try {
@@ -526,4 +565,359 @@ export async function deleteTaxRecord(id) {
   const filtered = localList.filter(t => t.id !== id);
   setLocal(STORAGE_KEYS.TAX, filtered);
   return true;
+}
+
+
+// ==============================================================================
+// 5. MODUL MASTER USER & ROLES (AUTHENTICATION & RBAC)
+// ==============================================================================
+export async function fetchUsers() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('app_users').select('*').order('created_at', { ascending: true });
+      if (!error && data && data.length > 0) {
+        return data.map(u => ({
+          id: u.id,
+          email: u.email,
+          password: u.password,
+          fullName: u.full_name,
+          role: u.role,
+          department: u.department,
+          phone: u.phone,
+          isActive: u.is_active !== false,
+          lastLogin: u.last_login
+        }));
+      }
+      if (error && error.code !== 'PGRST116') {
+        console.warn('Note: app_users table in Supabase:', error.message);
+      }
+    } catch (err) {
+      console.warn('Error reading app_users from Supabase:', err);
+    }
+  }
+
+  let local = getLocal(STORAGE_KEYS.USERS, null);
+  if (!local || local.length === 0) {
+    local = INITIAL_USERS;
+    setLocal(STORAGE_KEYS.USERS, local);
+  }
+  return local;
+}
+
+export async function saveUser(user) {
+  const supabase = getSupabase();
+  const id = user.id || `usr-${Date.now()}`;
+  const newUser = { ...user, id };
+
+  if (supabase) {
+    try {
+      const dbPayload = {
+        id: newUser.id,
+        email: newUser.email,
+        password: newUser.password,
+        full_name: newUser.fullName,
+        role: newUser.role,
+        department: newUser.department || '',
+        phone: newUser.phone || '',
+        is_active: newUser.isActive !== false,
+        last_login: newUser.lastLogin || null
+      };
+      await supabase.from('app_users').upsert(dbPayload);
+    } catch (err) {
+      console.warn('Supabase upsert app_users error:', err);
+    }
+  }
+
+  const localList = await fetchUsers();
+  const index = localList.findIndex(u => u.id === id || u.email === user.email);
+  let updated;
+  if (index >= 0) {
+    updated = [...localList];
+    updated[index] = newUser;
+  } else {
+    updated = [...localList, newUser];
+  }
+  setLocal(STORAGE_KEYS.USERS, updated);
+  return newUser;
+}
+
+export async function deleteUser(id) {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('app_users').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase delete app_users error:', err);
+    }
+  }
+
+  const localList = await fetchUsers();
+  const filtered = localList.filter(u => u.id !== id);
+  setLocal(STORAGE_KEYS.USERS, filtered);
+  return true;
+}
+
+// ROLES
+export async function fetchRoles() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('app_roles').select('*').order('name', { ascending: true });
+      if (!error && data && data.length > 0) {
+        return data.map(r => ({
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          permissions: r.permissions || [],
+          isSystem: r.is_system
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading app_roles from Supabase:', err);
+    }
+  }
+
+  let local = getLocal(STORAGE_KEYS.ROLES, null);
+  if (!local || local.length === 0) {
+    local = INITIAL_ROLES;
+    setLocal(STORAGE_KEYS.ROLES, local);
+  }
+  return local;
+}
+
+export async function saveRole(role) {
+  const supabase = getSupabase();
+  const id = role.id || `role-${Date.now()}`;
+  const newRole = { ...role, id };
+
+  if (supabase) {
+    try {
+      const dbPayload = {
+        id: newRole.id,
+        name: newRole.name,
+        description: newRole.description || '',
+        permissions: newRole.permissions || [],
+        is_system: !!newRole.isSystem
+      };
+      await supabase.from('app_roles').upsert(dbPayload);
+    } catch (err) {
+      console.warn('Supabase upsert app_roles error:', err);
+    }
+  }
+
+  const localList = await fetchRoles();
+  const index = localList.findIndex(r => r.id === id || r.name === role.name);
+  let updated;
+  if (index >= 0) {
+    updated = [...localList];
+    updated[index] = newRole;
+  } else {
+    updated = [...localList, newRole];
+  }
+  setLocal(STORAGE_KEYS.ROLES, updated);
+  return newRole;
+}
+
+export async function deleteRole(id) {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('app_roles').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase delete app_roles error:', err);
+    }
+  }
+
+  const localList = await fetchRoles();
+  const filtered = localList.filter(r => r.id !== id);
+  setLocal(STORAGE_KEYS.ROLES, filtered);
+  return true;
+}
+
+// ==============================================================================
+// 7. MODUL DEPOSIT VENDOR & AUDIT TRAIL PEMBAYARAN (LUNAS)
+// ==============================================================================
+
+export function fetchVendorDeposits() {
+  return getLocal(STORAGE_KEYS.VENDOR_DEPOSITS, {});
+}
+
+export function getVendorDeposit(vendorId) {
+  if (!vendorId) return { balance: 0, history: [] };
+  const deposits = fetchVendorDeposits();
+  return deposits[vendorId] || { balance: 0, history: [] };
+}
+
+export function updateVendorDeposit(vendorId, amountDelta, { referenceNo = '', memo = '', type = '' } = {}) {
+  if (!vendorId) return null;
+  const deposits = fetchVendorDeposits();
+  const current = deposits[vendorId] || { balance: 0, history: [] };
+  const newBalance = Math.max(0, (Number(current.balance) || 0) + Number(amountDelta || 0));
+  const newEntry = {
+    id: `dep-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    date: new Date().toISOString().slice(0, 10),
+    amount: Math.abs(Number(amountDelta || 0)),
+    type: type || (amountDelta >= 0 ? 'IN' : 'OUT'),
+    referenceNo: referenceNo || '',
+    memo: memo || '',
+    createdAt: new Date().toISOString(),
+    balanceAfter: newBalance
+  };
+  const updated = {
+    ...deposits,
+    [vendorId]: {
+      balance: newBalance,
+      history: [newEntry, ...(current.history || [])]
+    }
+  };
+  setLocal(STORAGE_KEYS.VENDOR_DEPOSITS, updated);
+  return updated[vendorId];
+}
+
+export function fetchPaymentTransactions() {
+  return getLocal(STORAGE_KEYS.PAYMENT_TRANSACTIONS, []);
+}
+
+export function recordPaymentTransaction(tx) {
+  const list = fetchPaymentTransactions();
+  const newTx = {
+    id: tx.id || `paytx-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    createdAt: new Date().toISOString(),
+    ...tx
+  };
+  setLocal(STORAGE_KEYS.PAYMENT_TRANSACTIONS, [newTx, ...list]);
+  return newTx;
+}
+
+/**
+ * Eksekusi Pembayaran Pengajuan (Single atau Batch Kelompok)
+ */
+export async function executePurchasePayment({
+  prList = [],
+  vendorId,
+  vendorName,
+  paymentDate,
+  referenceNo,
+  paymentMethod, // 'Kas' | 'Bank' | 'Deposit'
+  accountCode,   // COA code (e.g. '1101', '1102')
+  accountName = '',
+  paidAmount = 0,
+  depositUsed = 0,
+  excessAmount = 0,
+  approvedExcessAsDeposit = false,
+  notes = '',
+  currentUser
+}) {
+  if (!prList || prList.length === 0) {
+    throw new Error('Tidak ada pengajuan yang dipilih untuk dibayar.');
+  }
+
+  // 1. Potong Saldo Akun COA jika Kas atau Bank
+  let updatedCOA = null;
+  if (paymentMethod === 'Kas' || paymentMethod === 'Bank') {
+    if (accountCode && paidAmount > 0) {
+      const coaAll = await fetchCOA();
+      const targetAccount = coaAll.find(a => a.code === accountCode);
+      if (targetAccount) {
+        const curBal = Number(targetAccount.balance || 0);
+        const newBal = Math.max(0, curBal - paidAmount);
+        updatedCOA = await saveCOAAccount({
+          ...targetAccount,
+          balance: newBal
+        });
+      }
+    }
+  }
+
+  // 2. Potong Deposit jika metode DEPOSIT
+  if (paymentMethod === 'Deposit' && depositUsed > 0 && vendorId) {
+    updateVendorDeposit(vendorId, -depositUsed, {
+      referenceNo,
+      memo: `Pembayaran ${prList.length} PR via Saldo Deposit (${prList.map(p => p.requestNumber).join(', ')})`,
+      type: 'OUT'
+    });
+  }
+
+  // 3. Tambah Deposit jika ada kelebihan pembayaran dan disetujui
+  if (excessAmount > 0 && approvedExcessAsDeposit && vendorId) {
+    updateVendorDeposit(vendorId, excessAmount, {
+      referenceNo,
+      memo: `Kelebihan pembayaran pelunasan PR ref ${referenceNo} dialokasikan ke Deposit Rekanan`,
+      type: 'IN'
+    });
+  }
+
+  // 4. Distribusikan Pembayaran ke masing-masing PR
+  let fundAvailable = paymentMethod === 'Deposit' ? depositUsed : paidAmount;
+  const updatedPRs = [];
+
+  for (const pr of prList) {
+    const curDue = Number(pr.remainingPayable !== undefined ? pr.remainingPayable : pr.totalPayable) || 0;
+    const allocation = Math.min(fundAvailable, curDue);
+    const newRemaining = Math.max(0, curDue - allocation);
+    fundAvailable = Math.max(0, fundAvailable - allocation);
+
+    const isFullyPaid = newRemaining === 0;
+    const newStatus = isFullyPaid ? 'Lunas' : 'Sebagian Dibayar';
+
+    const paymentRecord = {
+      id: `pay-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      paymentDate,
+      referenceNo,
+      paymentMethod,
+      accountCode: accountCode || (paymentMethod === 'Deposit' ? 'DEPOSIT' : ''),
+      accountName: accountName || (paymentMethod === 'Deposit' ? 'Deposit Vendor' : ''),
+      allocatedAmount: allocation,
+      remainingPayable: newRemaining,
+      status: newStatus,
+      paidBy: currentUser?.fullName || 'Staff Keuangan',
+      paidAt: new Date().toISOString(),
+      notes: notes || ''
+    };
+
+    const existingHistory = Array.isArray(pr.paymentHistory) ? pr.paymentHistory : [];
+    const updatedPRData = {
+      ...pr,
+      status: newStatus,
+      remainingPayable: newRemaining,
+      paidAmount: (Number(pr.paidAmount || 0)) + allocation,
+      paymentHistory: [paymentRecord, ...existingHistory]
+    };
+
+    const saved = await savePurchaseRequest(updatedPRData);
+    updatedPRs.push(saved);
+  }
+
+  // 5. Simpan Audit Trail Transaksi Pembayaran
+  const totalDue = prList.reduce((sum, p) => sum + (Number(p.remainingPayable !== undefined ? p.remainingPayable : p.totalPayable) || 0), 0);
+  const auditTx = {
+    referenceNo,
+    paymentDate,
+    vendorId,
+    vendorName: vendorName || prList[0]?.vendorName || 'Rekanan',
+    prNumbers: prList.map(p => p.requestNumber),
+    prTitles: prList.map(p => p.title),
+    paymentMethod,
+    accountCode: accountCode || (paymentMethod === 'Deposit' ? 'DEPOSIT' : ''),
+    accountName: accountName || (paymentMethod === 'Deposit' ? 'Deposit Vendor' : ''),
+    nominalPengajuan: totalDue,
+    nominalPembayaranAktual: paymentMethod === 'Deposit' ? depositUsed : paidAmount,
+    depositUsed,
+    excessAmount,
+    approvedExcessAsDeposit: !!approvedExcessAsDeposit,
+    selisih: totalDue - (paymentMethod === 'Deposit' ? depositUsed : paidAmount),
+    finalStatus: updatedPRs.every(p => p.status === 'Lunas') ? 'Lunas' : 'Sebagian Dibayar',
+    paidBy: currentUser?.fullName || 'Staff Keuangan',
+    notes: notes || ''
+  };
+
+  recordPaymentTransaction(auditTx);
+
+  return {
+    success: true,
+    updatedPRs,
+    updatedCOA,
+    auditTx
+  };
 }

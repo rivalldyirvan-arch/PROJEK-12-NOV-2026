@@ -8,10 +8,15 @@ import {
   Calculator, 
   Database,
   FileSpreadsheet,
-  CheckCircle2
+  CheckCircle2,
+  UserCheck,
+  Shield
 } from 'lucide-react';
+import { useAuth } from '../lib/authContext';
 
 export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, stats }) {
+  const { isAdmin, currentUser } = useAuth();
+
   const menuItems = [
     { 
       id: 'dashboard', 
@@ -51,6 +56,14 @@ export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, 
       label: 'Kalkulator Pajak DJP', 
       icon: Calculator,
       badge: 'Simulasi'
+    },
+    {
+      id: 'users',
+      label: '5. Master User & Role',
+      sub: 'Manajemen RBAC',
+      icon: UserCheck,
+      badge: isAdmin ? 'Admin' : 'Terkunci',
+      badgeColor: isAdmin ? 'bg-purple-100 text-purple-800' : 'bg-slate-800 text-slate-500'
     }
   ];
 
@@ -122,8 +135,8 @@ export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, 
       </div>
 
       <div className="p-4 border-t border-slate-800 text-center text-[10px] text-slate-500">
-        Google Sheets Template Compatible<br />
-        DJP Compliance PPh 21/22/23/25/4(2)
+        User: <span className="text-emerald-400 font-semibold">{currentUser?.fullName?.split(' ')[0] || 'Guest'}</span> ({currentUser?.role || '-'})<br />
+        RBAC Auth & Supabase Sync
       </div>
     </aside>
   );

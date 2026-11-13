@@ -1,10 +1,20 @@
 import React from 'react';
-import { Database, ShieldCheck, Building2, Bell, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Database, ShieldCheck, Building2, User, LogOut } from 'lucide-react';
 import { getActiveSupabaseConfig } from '../lib/supabase';
+import { useAuth } from '../lib/authContext';
 
 export default function Navbar({ onOpenSupabaseModal, isSupabaseActive }) {
   const { url } = getActiveSupabaseConfig();
   const hasConfig = !!url;
+  const { currentUser, logout } = useAuth();
+
+  const roleColors = {
+    'Admin': 'bg-purple-100 text-purple-800 border-purple-200',
+    'Finance & Accounting': 'bg-blue-100 text-blue-800 border-blue-200',
+    'Tax Officer': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    'Manager': 'bg-amber-100 text-amber-800 border-amber-200',
+    'Staff / Requester': 'bg-slate-100 text-slate-700 border-slate-200'
+  };
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 sticky top-0 z-30 flex items-center justify-between px-6 shadow-xs">
@@ -22,7 +32,7 @@ export default function Navbar({ onOpenSupabaseModal, isSupabaseActive }) {
         </div>
       </div>
 
-      {/* Right: Supabase Connection Badge & Tools */}
+      {/* Right: Supabase Connection Badge, User Profile & Logout */}
       <div className="flex items-center space-x-3">
         <button
           onClick={onOpenSupabaseModal}
@@ -45,14 +55,34 @@ export default function Navbar({ onOpenSupabaseModal, isSupabaseActive }) {
 
         <div className="h-6 w-[1px] bg-slate-200" />
 
-        <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
-          <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          <span className="font-medium">PT Solusi Finansial Digital</span>
-          <span className="text-slate-400">|</span>
-          <span className="text-slate-500">Masa: Nov 2026</span>
-        </div>
+        {/* Current User Info */}
+        {currentUser && (
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1 rounded-xl">
+              <div className="w-7 h-7 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold text-xs uppercase shadow-xs">
+                {currentUser.fullName ? currentUser.fullName.slice(0, 2) : 'US'}
+              </div>
+              <div className="text-left">
+                <div className="font-bold text-xs text-slate-800 leading-tight">{currentUser.fullName}</div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${roleColors[currentUser.role] || 'bg-slate-100 text-slate-700'}`}>
+                    {currentUser.role}
+                  </span>
+                  <span className="text-[10px] text-slate-400">• {currentUser.department || 'Kantor'}</span>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={logout}
+              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition border border-transparent hover:border-rose-200"
+              title="Keluar dari akun (Logout)"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );
 }
-

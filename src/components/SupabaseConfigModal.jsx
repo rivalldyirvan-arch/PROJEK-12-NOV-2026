@@ -138,16 +138,55 @@ CREATE TABLE IF NOT EXISTS tax_records (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS app_roles (
+    id TEXT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    permissions JSONB DEFAULT '[]'::jsonb,
+    is_system BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS app_users (
+    id TEXT PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL,
+    department VARCHAR(100),
+    phone VARCHAR(50),
+    is_active BOOLEAN DEFAULT TRUE,
+    last_login TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Buka izin akses RLS:
 ALTER TABLE coa ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vendors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE purchase_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tax_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_users ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public all access on coa" ON coa FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on vendors" ON vendors FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on purchase_requests" ON purchase_requests FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public all access on tax_records" ON tax_records FOR ALL USING (true) WITH CHECK (true);`;
+CREATE POLICY "Allow public all access on tax_records" ON tax_records FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on app_roles" ON app_roles FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on app_users" ON app_users FOR ALL USING (true) WITH CHECK (true);
+
+-- Seed Roles & Admin
+INSERT INTO app_roles (id, name, description, permissions, is_system) VALUES
+('role-admin', 'Admin', 'Super Administrator penuh', '["manage_users", "manage_roles", "manage_coa", "manage_vendors", "create_purchase", "approve_purchase", "pay_purchase", "manage_taxes", "view_reports"]'::jsonb, true),
+('role-finance', 'Finance & Accounting', 'Kelola Keuangan & Pembayaran', '["manage_coa", "manage_vendors", "create_purchase", "approve_purchase", "pay_purchase", "manage_taxes", "view_reports"]'::jsonb, true),
+('role-tax', 'Tax Officer', 'Petugas Pajak PPh', '["manage_vendors", "manage_taxes", "view_reports"]'::jsonb, true),
+('role-manager', 'Manager', 'Approval Pengajuan Pembelian', '["create_purchase", "approve_purchase", "view_reports"]'::jsonb, true),
+('role-staff', 'Staff / Requester', 'Pengajuan Pembelian', '["create_purchase", "view_reports"]'::jsonb, true)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO app_users (id, email, password, full_name, role, department, phone, is_active) VALUES
+('usr-1', 'admin@perusahaan.com', 'admin123', 'Irvan Kholik (Super Admin)', 'Admin', 'Executive & IT', '0812-9988-7766', true)
+ON CONFLICT (id) DO NOTHING;`;
 
   const copySql = () => {
     navigator.clipboard.writeText(sqlSample);

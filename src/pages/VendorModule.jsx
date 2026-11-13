@@ -20,7 +20,7 @@ import {
   Receipt
 } from 'lucide-react';
 import { formatRupiah, formatDateIndo } from '../lib/taxRules';
-import { saveVendor, deleteVendor } from '../lib/databaseService';
+import { saveVendor, deleteVendor, getVendorDeposit } from '../lib/databaseService';
 
 const VENDOR_CATEGORIES = [
   'IT & Software',
@@ -238,6 +238,7 @@ export default function VendorModule({ vendorList = [], purchaseRequests = [], t
           filteredVendors.map((vendor) => {
             const linkedPRs = purchaseRequests.filter(p => p.vendorId === vendor.id);
             const linkedTaxes = taxRecords.filter(t => t.vendorId === vendor.id);
+            const vendorDeposit = getVendorDeposit(vendor.id);
 
             return (
               <div 
@@ -251,6 +252,11 @@ export default function VendorModule({ vendorList = [], purchaseRequests = [], t
                       {vendor.code}
                     </span>
                     <div className="flex items-center gap-1.5">
+                      {vendorDeposit?.balance > 0 && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-800 border border-amber-200" title="Saldo deposit vendor">
+                          Deposit: {formatRupiah(vendorDeposit.balance)}
+                        </span>
+                      )}
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
                         vendor.type === 'Badan' ? 'bg-sky-100 text-sky-800' : 'bg-purple-100 text-purple-800'
                       }`}>
