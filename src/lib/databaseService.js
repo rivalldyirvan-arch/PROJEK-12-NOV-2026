@@ -921,3 +921,141 @@ export async function executePurchasePayment({
     auditTx
   };
 }
+
+/**
+ * Batalkan Pelunasan Pengajuan (Cancel Payment / Reversal)
+ * Mengembalikan status PR menjadi 'Disetujui', paidAmount = 0, remainingPayable = totalPayable.
+ * Melakukan pembalikan saldo Kas/Bank atau Deposit jika tercatat dalam histori pembayaran.
+ * Mencatat reversal audit trail di buku transaksi dan paymentHistory.
+ */
+export async function cancelPurchasePayment({
+  pr,
+  cancellationReason = '',
+  currentUser
+}) {
+  if (!pr || !pr.id) {
+    throw new Error('Data pengajuan tidak valid untuk dibatalkan.');
+  }
+  if (pr.status !== 'Lunas') {
+    throw new Error('Hanya pengajuan dengan status Lunas yang dapat dibatalkan pelunasannya.');
+  }
+
+  const netPayable = Number(pr.totalPayable || 0);
+  const existingHistory = Array.isArray(pr.paymentHistory) ? pr.paymentHistory : [];
+  
+  // Cari transaksi pembayaran terakhir atau yang relevan untuk reversal
+  const lastPayment = existingHistory[0] || null;
+  const paidToReverse = Number(pr.paidAmount || (lastPayment?.allocatedAmount ?? netPayable)) || 0;
+  const reversalDate = new Date().toISOString().slice(0, 10);
+  const reversalRef = `REV-${lastPayment?.referenceNo || pr.requestNumber || Date.now()}`;
+
+  // 1. Reversal Saldo Kas/Bank di COA jika pembayaran sebelumnya menggunakan Kas/Bank
+  let reversedCOA = null;
+  if (lastPayment && (lastPayment.paymentMethod === 'Kas' || lastPayment.paymentMethod === 'Bank') && lastPayment.accountCode && paidToReverse > 0) {
+    try {
+      const coaAll = await fetchCOA();
+      const targetAccount = coaAll.find(a => a.code === lastPayment.accountCode);
+      if (targetAccount) {
+        const curBal = Number(targetAccount.balance || 0);
+        const newBal = curBal + paidToReverse; // Kembalikan dana ke kas/bank
+        reversedCOA = await saveCOAAccount({
+          ...targetAccount,
+          balance: newBal
+        });
+      }
+    } catch (err) {
+      console.warn('Gagal membalik saldo COA saat pembatalan:', err);
+    }
+  }
+
+  // 2. Reversal Saldo Deposit Vendor jika pembayaran sebelumnya menggunakan Deposit
+  if (lastPayment && lastPayment.paymentMethod === 'Deposit' && pr.vendorId && paidToReverse > 0) {
+    try {
+      updateVendorDeposit(pr.vendorId, paidToReverse, {
+        referenceNo: reversalRef,
+        memo: `Pembalikan penggunaan deposit atas pembatalan pelunasan PR ${pr.requestNumber}`,
+        type: 'IN'
+      });
+    } catch (err) {
+      console.warn('Gagal membalik saldo deposit saat pembatalan:', err);
+    }
+  }
+
+  // 3. Catat Entri Reversal ke Payment History PR (Jangan hapus histori, buat entri pembatalan)
+  const reversalRecord = {
+    id: `rev-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    paymentDate: reversalDate,
+    referenceNo: reversalRef,
+    paymentMethod: lastPayment?.paymentMethod || 'Reversal',
+    accountCode: lastPayment?.accountCode || '',
+    accountName: lastPayment?.accountName || '',
+    allocatedAmount: -paidToReverse,
+    remainingPayable: netPayable,
+    status: 'Disetujui',
+    cancelledBy: currentUser?.fullName || 'Staff Keuangan',
+    cancelledAt: new Date().toISOString(),
+    cancellationReason: cancellationReason || 'Pembatalan Pelunasan oleh Pengguna',
+    notes: `Pelunasan dibatalkan. Status dikembalikan ke Disetujui.`
+  };
+
+  // 4. Update Data Pengajuan Pembelian:
+  // Status kembali ke 'Disetujui', paidAmount = 0, remainingPayable = netPayable
+  // DPP, PPh, Vendor, dan data pengadaan tidak berubah!
+  const updatedPRData = {
+    ...pr,
+    status: 'Disetujui',
+    paidAmount: 0,
+    remainingPayable: netPayable,
+    paymentHistory: [reversalRecord, ...existingHistory]
+  };
+
+  const savedPR = await savePurchaseRequest(updatedPRData);
+
+  // 5. Catat ke Audit Trail Transaksi Pembayaran (payment_transactions)
+  const cancelTx = {
+    referenceNo: reversalRef,
+    paymentDate: reversalDate,
+    vendorId: pr.vendorId || null,
+    vendorName: pr.vendorName || 'Rekanan',
+    prNumbers: [pr.requestNumber],
+    prTitles: [pr.title],
+    paymentMethod: `BATAL (${lastPayment?.paymentMethod || 'Pelunasan'})`,
+    accountCode: lastPayment?.accountCode || '',
+    accountName: lastPayment?.accountName || '',
+    nominalPengajuan: netPayable,
+    nominalPembayaranAktual: -paidToReverse,
+    depositUsed: 0,
+    excessAmount: 0,
+    approvedExcessAsDeposit: false,
+    selisih: netPayable,
+    finalStatus: 'Disetujui (Pelunasan Dibatalkan)',
+    paidBy: currentUser?.fullName || 'Staff Keuangan',
+    notes: `PEMBATALAN PELUNASAN: ${cancellationReason || 'Koreksi transaksi pelunasan'}`
+  };
+
+  recordPaymentTransaction(cancelTx);
+
+  // 6. Sinkronisasi status pajak jika ada
+  if (pr.pphType && pr.pphType !== 'Non-PPh' && pr.pphAmount > 0) {
+    try {
+      const taxList = await fetchTaxRecords();
+      const taxItem = taxList.find(t => t.referenceNo === pr.requestNumber);
+      if (taxItem && taxItem.status !== 'Lunas / Disetor (NTPN)') {
+        await saveTaxRecord({
+          ...taxItem,
+          status: 'Draft / Belum Disetor',
+          paymentDate: null
+        });
+      }
+    } catch (err) {
+      console.warn('Gagal memperbarui status pajak saat pembatalan:', err);
+    }
+  }
+
+  return {
+    success: true,
+    updatedPR: savedPR,
+    reversedCOA,
+    cancelTx
+  };
+}

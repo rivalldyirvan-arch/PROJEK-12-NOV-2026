@@ -26,10 +26,11 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
-  Lock
+  Lock,
+  RotateCcw
 } from 'lucide-react';
 import { formatRupiah, formatDateIndo, TAX_TYPES, calculateTax } from '../lib/taxRules';
-import { savePurchaseRequest, deletePurchaseRequest, saveVendor, executePurchasePayment, getVendorDeposit } from '../lib/databaseService';
+import { savePurchaseRequest, deletePurchaseRequest, saveVendor, executePurchasePayment, cancelPurchasePayment, getVendorDeposit } from '../lib/databaseService';
 import { useAuth } from '../lib/authContext';
 import PurchasePrintPreviewModal from './PurchasePrintPreviewModal';
 
@@ -87,6 +88,11 @@ export default function PurchaseModule({
     notes: ''
   });
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+
+  // Cancel Payment Modal State
+  const [cancellingPR, setCancellingPR] = useState(null);
+  const [cancellationReason, setCancellationReason] = useState('');
+  const [isSubmittingCancellation, setIsSubmittingCancellation] = useState(false);
 
   // New Vendor Registration State
   const [isNewVendorModalOpen, setIsNewVendorModalOpen] = useState(false);
@@ -692,6 +698,45 @@ export default function PurchaseModule({
     }
   };
 
+  // Open Cancel Payment Modal
+  const handleOpenCancelPayment = (pr) => {
+    const isAllowed = hasPermission('pay_purchase') || currentUser?.role?.toLowerCase().includes('admin') || currentUser?.role?.toLowerCase().includes('finance');
+    if (!isAllowed) {
+      alert('Akses Ditolak: Anda tidak memiliki wewenang untuk membatalkan pelunasan. Hanya Finance dan Admin yang berwenang.');
+      return;
+    }
+    setCancellingPR(pr);
+    setCancellationReason('');
+  };
+
+  // Confirm Cancel Payment
+  const handleConfirmCancelPayment = async (e) => {
+    e?.preventDefault();
+    if (!cancellingPR || isSubmittingCancellation) return;
+
+    setIsSubmittingCancellation(true);
+    try {
+      await cancelPurchasePayment({
+        pr: cancellingPR,
+        cancellationReason,
+        currentUser
+      });
+
+      if (onRefresh) {
+        await onRefresh();
+      }
+
+      showToast?.(`Pelunasan pengajuan ${cancellingPR.requestNumber} berhasil dibatalkan. Status dikembalikan ke 'Disetujui'.`, 'success');
+      setCancellingPR(null);
+      setCancellationReason('');
+    } catch (err) {
+      console.error('Error cancelling payment:', err);
+      showToast?.('Gagal membatalkan pelunasan: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setIsSubmittingCancellation(false);
+    }
+  };
+
   // Status Action (Approve, Reject, Pay)
   const handleUpdateStatus = async (pr, newStatus) => {
     const updated = {
@@ -949,6 +994,21 @@ export default function PurchaseModule({
                             ) : (
                               <span className="text-[10px] text-emerald-600 font-medium">Disetujui</span>
                             )
+                          )}
+
+                          {/* Tombol Batalkan Pelunasan (Hanya muncul jika status Lunas) */}
+                          {pr.status === 'Lunas' && (
+                            hasPermission('pay_purchase') ? (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenCancelPayment(pr)}
+                                className="px-2.5 py-1 text-[10px] font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-md transition shadow-2xs flex items-center gap-1 cursor-pointer"
+                                title="Batalkan Pelunasan dan kembalikan ke status Disetujui"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                <span>Batalkan Pelunasan</span>
+                              </button>
+                            ) : null
                           )}
 
                           {/* Edit & Delete */}
@@ -2145,6 +2205,121 @@ export default function PurchaseModule({
                     )}
                   </button>
                 </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* MODAL KONFIRMASI BATALKAN PELUNASAN (CANCEL PAYMENT)               */}
+      {/* ================================================================= */}
+      {cancellingPR && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="p-4 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-100 text-amber-800 rounded-xl">
+                  <AlertTriangle className="w-5 h-5 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    Konfirmasi Pembatalan Pelunasan
+                  </h3>
+                  <p className="text-[11px] text-slate-600 font-mono">
+                    {cancellingPR.requestNumber} • {cancellingPR.vendorName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCancellingPR(null)}
+                disabled={isSubmittingCancellation}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <form onSubmit={handleConfirmCancelPayment} className="p-5 space-y-4">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed">
+                <p className="font-semibold text-slate-900 mb-1">
+                  Apakah Anda yakin ingin membatalkan pelunasan pengajuan ini?
+                </p>
+                <p className="text-slate-600 text-[11px]">
+                  Status pengajuan akan dikembalikan menjadi <strong>Disetujui</strong> dan nominal pembayaran akan dikembalikan ke kondisi sebelum pelunasan.
+                </p>
+              </div>
+
+              {/* Rincian Finansial Reversal */}
+              <div className="bg-amber-50/50 p-3.5 rounded-xl border border-amber-200 space-y-2 text-xs">
+                <div className="flex items-center justify-between text-slate-600">
+                  <span>DPP Nilai Bersih:</span>
+                  <span className="font-mono font-bold text-slate-800">{formatRupiah(cancellingPR.dpp)}</span>
+                </div>
+                {cancellingPR.pphType !== 'Non-PPh' && cancellingPR.pphAmount > 0 && (
+                  <div className="flex items-center justify-between text-purple-700">
+                    <span>Potongan {cancellingPR.pphType}:</span>
+                    <span className="font-mono font-bold">-{formatRupiah(cancellingPR.pphAmount)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-slate-600 border-t border-amber-200/80 pt-1.5">
+                  <span>Net Dibayar:</span>
+                  <span className="font-mono font-bold text-slate-900">{formatRupiah(cancellingPR.totalPayable)}</span>
+                </div>
+                <div className="flex items-center justify-between text-rose-700">
+                  <span>Total Pembayaran Dibatalkan:</span>
+                  <span className="font-mono font-extrabold">{formatRupiah(cancellingPR.paidAmount || cancellingPR.totalPayable)}</span>
+                </div>
+                <div className="flex items-center justify-between text-emerald-800 font-bold bg-white p-2 rounded-lg border border-amber-200">
+                  <span>Outstanding (Sisa Tagihan) Kembali:</span>
+                  <span className="font-mono">{formatRupiah(cancellingPR.totalPayable)}</span>
+                </div>
+              </div>
+
+              {/* Alasan Pembatalan (Audit Trail) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Alasan Pembatalan Pelunasan (Opsional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Contoh: Kesalahan input rekening / memo koreksi transaksi..."
+                  value={cancellationReason}
+                  onChange={(e) => setCancellationReason(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setCancellingPR(null)}
+                  disabled={isSubmittingCancellation}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+                >
+                  Kembali
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingCancellation}
+                  className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition shadow-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                >
+                  {isSubmittingCancellation ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Memproses Pembatalan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Ya, Batalkan Pelunasan</span>
+                    </>
+                  )}
+                </button>
               </div>
             </form>
           </div>
