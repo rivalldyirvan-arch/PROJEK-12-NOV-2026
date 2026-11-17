@@ -47,6 +47,7 @@ import {
   calculateDepreciationReconciliation
 } from '../lib/assetCalculator';
 import { useAuth } from '../lib/authContext';
+import SearchableSelect from '../components/SearchableSelect';
 
 export default function AssetModule({
   assets = [],
@@ -838,17 +839,22 @@ export default function AssetModule({
                 />
               </div>
 
-              <select
-                value={categoryFilter}
-                onChange={e => setCategoryFilter(e.target.value)}
-                className="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none font-semibold text-slate-700"
-              >
-                <option value="All">Semua Kategori</option>
-                {categories.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+              {/* Searchable Category Filter */}
+              <div className="min-w-[180px]">
+                <SearchableSelect
+                  value={categoryFilter}
+                  onChange={(val) => setCategoryFilter(val || 'All')}
+                  options={[
+                    { value: 'All', label: 'Semua Kategori' },
+                    ...categories.map(c => ({ value: c.id, label: c.name, code: c.code || '' }))
+                  ]}
+                  placeholder="Semua Kategori"
+                  searchPlaceholder="Cari kategori aset..."
+                  emptyMessage="Kategori tidak ditemukan"
+                />
+              </div>
 
+              {/* Status Filter */}
               <select
                 value={statusFilter}
                 onChange={e => setStatusFilter(e.target.value)}
@@ -1362,24 +1368,29 @@ export default function AssetModule({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-slate-600 font-bold mb-1">Kategori Aset *</label>
-                    <select
+                    <SearchableSelect
+                      required
                       value={assetFormData.categoryId}
-                      onChange={e => {
-                        const cat = categories.find(c => c.id === e.target.value);
+                      onChange={val => {
+                        const cat = categories.find(c => c.id === val);
                         setAssetFormData({
                           ...assetFormData,
-                          categoryId: e.target.value,
+                          categoryId: val,
                           depreciationMethod: cat?.defaultDeprecMethod || 'Garis Lurus',
                           usefulLifeYears: cat?.defaultUsefulLifeYears || 4,
                           taxGroup: cat?.taxGroup || 'Kelompok 1'
                         });
                       }}
-                      className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-semibold"
-                    >
-                      {categories.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
+                      options={categories.map(c => ({
+                        value: c.id,
+                        label: c.name,
+                        code: c.code,
+                        subtitle: `${c.taxGroup || 'Kelompok 1'} • Masa Manfaat: ${c.defaultUsefulLifeYears || 4} Thn`
+                      }))}
+                      placeholder="Pilih Kategori Aset..."
+                      searchPlaceholder="Cari nama atau kode kategori..."
+                      size="sm"
+                    />
                   </div>
                   <div>
                     <label className="block text-slate-600 font-bold mb-1">Tgl Perolehan</label>
@@ -1802,15 +1813,19 @@ export default function AssetModule({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-slate-700 font-semibold mb-1">Rekening Penerimaan</label>
-                      <select
+                      <SearchableSelect
                         value={disposalForm.paymentAccountCode}
-                        onChange={e => setDisposalForm({ ...disposalForm, paymentAccountCode: e.target.value })}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-semibold"
-                      >
-                        <option value="1102">Bank BCA Operasional (1102)</option>
-                        <option value="1101">Kas Kecil (1101)</option>
-                        <option value="1103">Bank Mandiri (1103)</option>
-                      </select>
+                        onChange={val => setDisposalForm({ ...disposalForm, paymentAccountCode: val })}
+                        options={coaList.filter(a => a.subCategory === 'Kas & Bank' || a.category === 'Asset').map(a => ({
+                          value: a.code,
+                          label: a.name,
+                          code: a.code,
+                          subtitle: `Saldo: ${formatRupiah(a.balance)}`
+                        }))}
+                        placeholder="Pilih Rekening Kas/Bank..."
+                        searchPlaceholder="Cari rekening kas / bank..."
+                        size="sm"
+                      />
                     </div>
                     <div>
                       <label className="block text-slate-700 font-semibold mb-1">Pembeli / Rekanan</label>

@@ -22,6 +22,7 @@ import {
 import { formatRupiah, formatDateIndo, TAX_TYPES, TAX_OBJECT_CODES } from '../lib/taxRules';
 import { saveTaxRecord, deleteTaxRecord } from '../lib/databaseService';
 import BupotPrintPreviewModal from './BupotPrintPreviewModal';
+import SearchableSelect from '../components/SearchableSelect';
 
 const MONTH_NAMES = [
   'Semua Bulan', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 
@@ -573,47 +574,118 @@ export default function TaxModule({ taxRecords = [], vendorList = [], onRefresh,
                 </div>
               </div>
 
-              {/* Taxpayer / Vendor */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Taxpayer / Vendor Selection */}
+              <div className="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Nama Wajib Pajak / Rekanan *
+                    Pilih Rekanan Vendor Terdaftar (Opsional)
                   </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Contoh: PT Sarana Jasa atau Nama Pribadi"
-                    value={formData.taxpayerName}
-                    onChange={(e) => setFormData({ ...formData, taxpayerName: e.target.value })}
-                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg font-medium"
+                  <SearchableSelect
+                    options={vendorList.map(v => ({
+                      value: v.id,
+                      label: v.name,
+                      code: v.code,
+                      subtitle: `${v.type} • NPWP: ${v.hasNpwp && v.npwp ? v.npwp : 'Non-NPWP'}`,
+                      badge: v.type,
+                      data: v
+                    }))}
+                    value={formData.vendorId || ''}
+                    onChange={(val, data) => {
+                      if (data) {
+                        setFormData(prev => ({
+                          ...prev,
+                          vendorId: data.id,
+                          taxpayerName: data.name,
+                          taxpayerNpwp: data.npwp || '',
+                          hasNpwp: data.hasNpwp !== false
+                        }));
+                      } else {
+                        setFormData(prev => ({ ...prev, vendorId: '' }));
+                      }
+                    }}
+                    placeholder="-- Cari Rekanan Vendor --"
+                    searchPlaceholder="Cari nama atau kode vendor..."
+                    clearable
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    NPWP / NIK
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="01.234.567.8-012.000"
-                    value={formData.taxpayerNpwp}
-                    onChange={(e) => setFormData({ ...formData, taxpayerNpwp: e.target.value })}
-                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg font-mono"
-                  />
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Nama Wajib Pajak / Rekanan *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Contoh: PT Sarana Jasa atau Nama Pribadi"
+                      value={formData.taxpayerName}
+                      onChange={(e) => setFormData({ ...formData, taxpayerName: e.target.value })}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      NPWP / NIK
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="01.234.567.8-012.000"
+                      value={formData.taxpayerNpwp}
+                      onChange={(e) => setFormData({ ...formData, taxpayerNpwp: e.target.value })}
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Object description */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Uraian Transaksi Objek Pajak
-                </label>
-                <input
-                  type="text"
-                  placeholder="Contoh: Jasa Konsultan IT atau Sewa Gedung Kantor"
-                  value={formData.taxObjectDescription}
-                  onChange={(e) => setFormData({ ...formData, taxObjectDescription: e.target.value })}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg"
-                />
+              {/* Kode & Objek Pajak DJP */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Kode & Objek Pajak DJP ({formData.taxType})
+                  </label>
+                  <SearchableSelect
+                    options={(TAX_OBJECT_CODES[formData.taxType] || []).map(obj => ({
+                      value: obj.code,
+                      label: obj.name,
+                      code: obj.code,
+                      subtitle: `Tarif Bawaan: ${obj.defaultRate}%`,
+                      data: obj
+                    }))}
+                    value={formData.taxObjectCode || ''}
+                    onChange={(val, data) => {
+                      if (data) {
+                        const newRate = data.defaultRate !== undefined ? data.defaultRate : formData.taxRate;
+                        const tax = Math.round((formData.dppAmount * newRate) / 100);
+                        setFormData(prev => ({
+                          ...prev,
+                          taxObjectCode: data.code,
+                          taxObjectDescription: data.name,
+                          taxRate: newRate,
+                          taxAmount: tax
+                        }));
+                      } else {
+                        setFormData(prev => ({ ...prev, taxObjectCode: '' }));
+                      }
+                    }}
+                    placeholder="Pilih / Cari Kode Objek Pajak..."
+                    searchPlaceholder="Cari kode objek atau nama transaksi..."
+                    clearable
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Uraian Transaksi Objek Pajak
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Jasa Konsultan IT atau Sewa Gedung Kantor"
+                    value={formData.taxObjectDescription}
+                    onChange={(e) => setFormData({ ...formData, taxObjectDescription: e.target.value })}
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg"
+                  />
+                </div>
               </div>
 
               {/* Amounts & Rates */}

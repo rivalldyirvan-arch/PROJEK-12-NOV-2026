@@ -34,6 +34,7 @@ import { formatRupiah, formatDateIndo, TAX_TYPES, calculateTax } from '../lib/ta
 import { savePurchaseRequest, deletePurchaseRequest, saveVendor, executePurchasePayment, cancelPurchasePayment, getVendorDeposit } from '../lib/databaseService';
 import { useAuth } from '../lib/authContext';
 import PurchasePrintPreviewModal from './PurchasePrintPreviewModal';
+import SearchableSelect from '../components/SearchableSelect';
 
 export const PPH_COA_MAP = {
   'PPh 23': { 
@@ -1228,24 +1229,25 @@ export default function PurchaseModule({
                   <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-1">
                     PILIH SUPPLIER / VENDOR DITUJU *
                   </label>
-                  <select
+                  <SearchableSelect
                     required
+                    options={vendorList.map(v => ({
+                      value: v.id,
+                      label: v.name,
+                      code: v.code,
+                      subtitle: `${v.type} • ${v.category} • NPWP: ${v.hasNpwp && v.npwp ? v.npwp : 'Non-NPWP'}`,
+                      badge: v.type,
+                      extraSearch: `${v.npwp || ''} ${v.bankName || ''} ${v.picName || ''}`
+                    }))}
                     value={formData.vendorId}
-                    onChange={(e) => handleVendorSelect(e.target.value)}
-                    className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
-                  >
-                    <option value="">-- Pilih Rekanan / Vendor --</option>
-                    <option value="__NEW_VENDOR__" className="text-emerald-700 font-extrabold bg-emerald-50 py-1">
-                      ➕ + Daftar Vendor/Supplier baru...
-                    </option>
-                    <optgroup label="─── Daftar Rekanan Terdaftar ───">
-                      {vendorList.map(v => (
-                        <option key={v.id} value={v.id}>
-                          {v.code} - {v.name} ({v.type})
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
+                    onChange={(val) => handleVendorSelect(val)}
+                    placeholder="-- Cari / Pilih Rekanan Vendor --"
+                    searchPlaceholder="Cari nama, kode vendor, atau NPWP..."
+                    actionOption={{
+                      label: '➕ + Daftar Vendor / Supplier Baru...',
+                      onSelect: handleOpenNewVendorModal
+                    }}
+                  />
                 </div>
 
                 <div className="text-xs text-slate-600 flex flex-col justify-center">
@@ -1332,22 +1334,26 @@ export default function PurchaseModule({
                 <div className="space-y-2">
                   {formData.items.map((item, index) => (
                     <div key={item.id || index} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                      {/* 1. Dropdown Produk (Menggantikan COA) */}
+                      {/* 1. Searchable Dropdown Produk */}
                       <div className="md:col-span-3">
-                        <select
+                        <SearchableSelect
                           value={item.productId || ''}
-                          onChange={(e) => handleProductSelect(index, e.target.value)}
-                          className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500 font-bold text-slate-800"
-                          title="Pilih Produk dari Master Produk"
-                        >
-                          <option value="">Pilih Produk...</option>
-                          <option value="custom">-- Input Manual / Non-Katalog --</option>
-                          {productList.map(p => (
-                            <option key={p.id} value={p.id}>
-                              {p.code} - {p.name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(val) => handleProductSelect(index, val)}
+                          options={[
+                            { value: 'custom', label: '-- Input Manual / Non-Katalog --', code: 'MANUAL', subtitle: 'Ketik deskripsi manual' },
+                            ...productList.map(p => ({
+                              value: p.id,
+                              label: p.name,
+                              code: p.code,
+                              subtitle: `${p.category || 'Umum'} • ${p.unit} • ${formatRupiah(p.purchasePrice)}`,
+                              badge: p.productType,
+                              extraSearch: `${p.barcode || ''} ${p.unit || ''}`
+                            }))
+                          ]}
+                          placeholder="Pilih Produk..."
+                          searchPlaceholder="Cari nama atau SKU..."
+                          size="sm"
+                        />
                       </div>
 
                       {/* 2. Deskripsi Item */}
@@ -1483,17 +1489,20 @@ export default function PurchaseModule({
                             <label className="block text-[11px] font-semibold text-slate-700 mb-1">
                               Jenis PPh Dipotong *
                             </label>
-                            <select
+                            <SearchableSelect
+                              required
                               value={formData.pphType}
-                              onChange={(e) => handlePphTypeSelect(e.target.value)}
-                              className="w-full px-2.5 py-1.5 text-xs bg-purple-50/50 border border-purple-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-500 font-bold text-purple-900"
-                            >
-                              {Object.entries(PPH_COA_MAP).map(([key, info]) => (
-                                <option key={key} value={key}>
-                                  {info.name}
-                                </option>
-                              ))}
-                            </select>
+                              onChange={(val) => handlePphTypeSelect(val)}
+                              options={Object.entries(PPH_COA_MAP).map(([key, info]) => ({
+                                value: key,
+                                label: info.name,
+                                code: info.coaCode,
+                                subtitle: info.coaName
+                              }))}
+                              placeholder="Pilih Jenis PPh..."
+                              searchPlaceholder="Cari jenis PPh atau kode COA..."
+                              emptyMessage="Jenis PPh tidak ditemukan"
+                            />
                           </div>
 
                           <div>
@@ -1556,29 +1565,37 @@ export default function PurchaseModule({
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
                         Akun Debet Utama (Beban / Aset)
                       </label>
-                      <select
+                      <SearchableSelect
                         value={formData.coaDebitAccount}
-                        onChange={(e) => setFormData({ ...formData, coaDebitAccount: e.target.value })}
-                        className="w-full px-2 py-1.5 text-[11px] bg-white border border-slate-300 rounded-lg"
-                      >
-                        {coaList.filter(a => a.category === 'Expense' || a.category === 'Asset').map(a => (
-                          <option key={a.id} value={a.code}>{a.code} - {a.name}</option>
-                        ))}
-                      </select>
+                        onChange={(val) => setFormData({ ...formData, coaDebitAccount: val })}
+                        options={coaList.filter(a => a.category === 'Expense' || a.category === 'Asset').map(a => ({
+                          value: a.code,
+                          label: a.name,
+                          code: a.code,
+                          subtitle: a.category
+                        }))}
+                        placeholder="Pilih Akun Debet..."
+                        searchPlaceholder="Cari nama atau kode akun..."
+                        size="sm"
+                      />
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
                         Akun Kredit Utama (Hutang Usaha)
                       </label>
-                      <select
+                      <SearchableSelect
                         value={formData.coaCreditAccount}
-                        onChange={(e) => setFormData({ ...formData, coaCreditAccount: e.target.value })}
-                        className="w-full px-2 py-1.5 text-[11px] bg-white border border-slate-300 rounded-lg"
-                      >
-                        {coaList.filter(a => a.category === 'Liability' || a.subCategory === 'Kas & Bank').map(a => (
-                          <option key={a.id} value={a.code}>{a.code} - {a.name}</option>
-                        ))}
-                      </select>
+                        onChange={(val) => setFormData({ ...formData, coaCreditAccount: val })}
+                        options={coaList.filter(a => a.category === 'Liability' || a.subCategory === 'Kas & Bank').map(a => ({
+                          value: a.code,
+                          label: a.name,
+                          code: a.code,
+                          subtitle: a.subCategory || a.category
+                        }))}
+                        placeholder="Pilih Akun Kredit..."
+                        searchPlaceholder="Cari nama atau kode akun..."
+                        size="sm"
+                      />
                     </div>
                   </div>
                 </div>
@@ -2144,17 +2161,18 @@ export default function PurchaseModule({
                     <label className="text-xs font-bold text-slate-700 block">
                       Pilih Rekening Bank Sumber (Modul Kas & Bank):
                     </label>
-                    <select
+                    <SearchableSelect
                       value={paymentForm.bankCode}
-                      onChange={(e) => setPaymentForm({ ...paymentForm, bankCode: e.target.value })}
-                      className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
-                    >
-                      {bankAccounts.map(b => (
-                        <option key={b.code} value={b.code}>
-                          {b.name} (Kode: {b.code}) — Saldo: {formatRupiah(b.balance)}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => setPaymentForm({ ...paymentForm, bankCode: val })}
+                      options={bankAccounts.map(b => ({
+                        value: b.code,
+                        label: b.name,
+                        code: b.code,
+                        subtitle: `Saldo: ${formatRupiah(b.balance)}`
+                      }))}
+                      placeholder="Pilih Rekening Bank..."
+                      searchPlaceholder="Cari nama atau kode bank..."
+                    />
                     <p className="text-[11px] text-slate-500">
                       Data rekening otomatis diambil dari Master Akun Kas & Bank dan saldo akan terpotong secara real-time.
                     </p>

@@ -31,6 +31,7 @@ import {
 import { formatRupiah } from '../lib/taxRules';
 import { saveProduct, deleteProduct } from '../lib/databaseService';
 import { useAuth } from '../lib/authContext';
+import SearchableSelect from '../components/SearchableSelect';
 
 export const COMMON_UNITS = [
   'Pcs', 'Unit', 'Kg', 'Gram', 'Rim', 'Dus', 'Box', 'Paket', 'Set',
@@ -1103,19 +1104,20 @@ export default function ProductModule({
                         <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                           Akun Pembelian (COA) *
                         </label>
-                        <select
+                        <SearchableSelect
                           required={formData.isPurchased}
                           value={formData.purchaseAccountCode}
-                          onChange={(e) => setFormData({ ...formData, purchaseAccountCode: e.target.value })}
-                          className="w-full px-2.5 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
-                        >
-                          <option value="">Pilih Akun Beban / Aset...</option>
-                          {purchaseCoaAccounts.map(a => (
-                            <option key={a.id} value={a.code}>
-                              {a.code} - {a.name} ({a.category})
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(val) => setFormData({ ...formData, purchaseAccountCode: val })}
+                          options={purchaseCoaAccounts.map(a => ({
+                            value: a.code,
+                            label: a.name,
+                            code: a.code,
+                            subtitle: `${a.category} • Saldo: ${formatRupiah(a.balance)}`
+                          }))}
+                          placeholder="Pilih Akun Beban / Aset..."
+                          searchPlaceholder="Cari nama atau kode akun..."
+                          size="sm"
+                        />
                         <span className="text-[10px] text-slate-400 mt-0.5 block">
                           COA untuk pencatatan beban/aset pembelian
                         </span>
@@ -1190,19 +1192,20 @@ export default function ProductModule({
                         <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                           Akun Penjualan (COA) *
                         </label>
-                        <select
+                        <SearchableSelect
                           required={formData.isSold}
                           value={formData.salesAccountCode}
-                          onChange={(e) => setFormData({ ...formData, salesAccountCode: e.target.value })}
-                          className="w-full px-2.5 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
-                        >
-                          <option value="">Pilih Akun Pendapatan...</option>
-                          {salesCoaAccounts.map(a => (
-                            <option key={a.id} value={a.code}>
-                              {a.code} - {a.name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(val) => setFormData({ ...formData, salesAccountCode: val })}
+                          options={salesCoaAccounts.map(a => ({
+                            value: a.code,
+                            label: a.name,
+                            code: a.code,
+                            subtitle: `${a.subCategory || a.category}`
+                          }))}
+                          placeholder="Pilih Akun Pendapatan..."
+                          searchPlaceholder="Cari nama atau kode pendapatan..."
+                          size="sm"
+                        />
                         <span className="text-[10px] text-slate-400 mt-0.5 block">
                           Contoh: 4-41100 Pendapatan Mitra
                         </span>
@@ -1231,18 +1234,19 @@ export default function ProductModule({
                         <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                           Akun Diskon Penjualan
                         </label>
-                        <select
+                        <SearchableSelect
                           value={formData.discountAccountCode}
-                          onChange={(e) => setFormData({ ...formData, discountAccountCode: e.target.value })}
-                          className="w-full px-2.5 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="">Pilih Akun Diskon...</option>
-                          {discountCoaAccounts.map(a => (
-                            <option key={a.id} value={a.code}>
-                              {a.code} - {a.name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(val) => setFormData({ ...formData, discountAccountCode: val })}
+                          options={discountCoaAccounts.map(a => ({
+                            value: a.code,
+                            label: a.name,
+                            code: a.code,
+                            subtitle: `${a.category}`
+                          }))}
+                          placeholder="Pilih Akun Diskon..."
+                          searchPlaceholder="Cari nama atau kode akun diskon..."
+                          size="sm"
+                        />
                         <span className="text-[10px] text-slate-400 mt-0.5 block">
                           Contoh: 4-40201 Unbilled Revenues
                         </span>
