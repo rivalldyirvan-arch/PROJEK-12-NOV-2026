@@ -27,12 +27,46 @@ import {
   ChevronDown,
   ChevronUp,
   Lock,
-  RotateCcw
+  RotateCcw,
+  Package
 } from 'lucide-react';
 import { formatRupiah, formatDateIndo, TAX_TYPES, calculateTax } from '../lib/taxRules';
 import { savePurchaseRequest, deletePurchaseRequest, saveVendor, executePurchasePayment, cancelPurchasePayment, getVendorDeposit } from '../lib/databaseService';
 import { useAuth } from '../lib/authContext';
 import PurchasePrintPreviewModal from './PurchasePrintPreviewModal';
+
+export const PPH_COA_MAP = {
+  'PPh 23': { 
+    name: 'PPh Pasal 23 (Jasa & Sewa)', 
+    coaCode: '2113', 
+    coaName: 'Hutang Pajak - PPh 23 Jasa/Sewa',
+    defaultRate: 2.0 
+  },
+  'PPh 21': { 
+    name: 'PPh Pasal 21 (Tenaga Ahli/Karyawan)', 
+    coaCode: '2111', 
+    coaName: 'Hutang Pajak - PPh 21 Karyawan/Ahli',
+    defaultRate: 2.5 
+  },
+  'PPh 22': { 
+    name: 'PPh Pasal 22 (Pengadaan Barang/BUMN)', 
+    coaCode: '2112', 
+    coaName: 'Hutang Pajak - PPh 22 Pengadaan',
+    defaultRate: 1.5 
+  },
+  'PPh 25': { 
+    name: 'PPh Pasal 25 (Angsuran Pajak)', 
+    coaCode: '2116', 
+    coaName: 'Hutang Pajak - PPh 25 Angsuran',
+    defaultRate: 0.75 
+  },
+  'PPh 4(2)': { 
+    name: 'PPh Pasal 4 Ayat (2) Final', 
+    coaCode: '2114', 
+    coaName: 'Hutang Pajak - PPh 4 Ayat (2) Final',
+    defaultRate: 10.0 
+  }
+};
 
 const DEPARTMENTS = [
   'Finance & Accounting',
@@ -58,6 +92,7 @@ const STATUS_FILTERS = ['Semua', 'Draft', 'Menunggu Persetujuan', 'Disetujui', '
 export default function PurchaseModule({
   purchaseRequests = [],
   vendorList = [],
+  productList = [],
   coaList = [],
   onRefresh,
   showToast
@@ -132,18 +167,20 @@ export default function PurchaseModule({
     subtotal: 0,
     discount: 0,
     dpp: 0,
-    ppnRate: 11,
+    ppnRate: 0,
     ppnAmount: 0,
-    pphType: 'PPh 23',
-    pphRate: 2.0,
+    hasPph: false, // Default: false (tidak dipotong PPh)
+    pphType: 'Non-PPh',
+    pphRate: 0,
     pphAmount: 0,
+    pphCoaAccount: '',
     totalPayable: 0,
     grandTotal: 0,
     status: 'Menunggu Persetujuan',
-    coaDebitAccount: '6103',
+    coaDebitAccount: '6105',
     coaCreditAccount: '2101',
     items: [
-      { id: '1', description: '', coaId: '6103', qty: 1, unit: 'Bulan', unitPrice: 0, subtotal: 0 }
+      { id: 'item-1', productId: '', description: '', coaId: '6105', qty: 1, unit: 'Unit', unitPrice: 0, taxRate: 0, subtotal: 0 }
     ]
   });
 
@@ -180,18 +217,20 @@ export default function PurchaseModule({
       subtotal: 0,
       discount: 0,
       dpp: 0,
-      ppnRate: 11,
+      ppnRate: 0,
       ppnAmount: 0,
-      pphType: 'PPh 23',
-      pphRate: 2.0,
+      hasPph: false,
+      pphType: 'Non-PPh',
+      pphRate: 0,
       pphAmount: 0,
+      pphCoaAccount: '',
       totalPayable: 0,
       grandTotal: 0,
       status: 'Menunggu Persetujuan',
-      coaDebitAccount: '6103',
+      coaDebitAccount: '6105',
       coaCreditAccount: '2101',
       items: [
-        { id: 'item-1', description: '', coaId: '6103', qty: 1, unit: 'Unit', unitPrice: 0, subtotal: 0 }
+        { id: 'item-1', productId: '', description: '', coaId: '6105', qty: 1, unit: 'Unit', unitPrice: 0, taxRate: 0, subtotal: 0 }
       ]
     });
     setIsModalOpen(true);
@@ -200,43 +239,74 @@ export default function PurchaseModule({
   // Open Edit Form
   const handleOpenEdit = (pr) => {
     setEditingPR(pr);
+    const hasPph = pr.hasPph !== undefined 
+      ? Boolean(pr.hasPph) 
+      : (pr.pphType && pr.pphType !== 'Non-PPh' && Number(pr.pphAmount || 0) > 0);
+
+    const initialItems = pr.items && pr.items.length > 0
+      ? pr.items.map((it, idx) => ({
+          ...it,
+          id: it.id || `item-${idx + 1}`,
+          productId: it.productId || '',
+          taxRate: it.taxRate !== undefined ? Number(it.taxRate) : (Number(pr.ppnRate) || 0)
+        }))
+      : [
+          { id: 'item-1', productId: '', description: pr.title, coaId: pr.coaDebitAccount || '6105', qty: 1, unit: 'Paket', unitPrice: pr.subtotal, taxRate: Number(pr.ppnRate) || 0, subtotal: pr.subtotal }
+        ];
+
     setFormData({
       ...pr,
-      items: pr.items && pr.items.length > 0 ? pr.items : [
-        { id: 'item-1', description: pr.title, coaId: pr.coaDebitAccount || '6103', qty: 1, unit: 'Paket', unitPrice: pr.subtotal, subtotal: pr.subtotal }
-      ]
+      hasPph,
+      pphType: hasPph ? (pr.pphType && pr.pphType !== 'Non-PPh' ? pr.pphType : 'PPh 23') : 'Non-PPh',
+      pphCoaAccount: hasPph ? (PPH_COA_MAP[pr.pphType]?.coaCode || '2113') : '',
+      items: initialItems
     });
     setIsModalOpen(true);
   };
 
   // Calculate totals when line items, taxes, or vendor changes
-  const recalculateTotals = (items, discountVal, ppnRateVal, pphTypeVal, pphRateVal, vendorIdVal) => {
+  const recalculateTotals = (items, discountVal, hasPphVal, pphTypeVal, pphRateVal, vendorIdVal) => {
     const sub = items.reduce((acc, it) => acc + (Number(it.subtotal) || 0), 0);
     const disc = Number(discountVal) || 0;
     const dpp = Math.max(0, sub - disc);
 
-    // PPN
-    const ppnRate = Number(ppnRateVal) || 0;
-    const ppnAmount = Math.round((dpp * ppnRate) / 100);
+    // Hitung PPN dari setiap line item
+    const rawLinePpn = items.reduce((acc, it) => {
+      const lineSub = Number(it.subtotal) || 0;
+      const lineRate = Number(it.taxRate) || 0;
+      return acc + ((lineSub * lineRate) / 100);
+    }, 0);
 
-    // Selected Vendor check for NPWP penalty
-    const vendor = vendorList.find(v => v.id === (vendorIdVal || formData.vendorId)) || (lastCreatedVendor && lastCreatedVendor.id === (vendorIdVal || formData.vendorId) ? lastCreatedVendor : null);
-    const hasNpwp = vendor ? vendor.hasNpwp : true;
+    // Jika ada diskon di level dokumen, pro-rata nilai PPN
+    const discountFactor = sub > 0 ? (dpp / sub) : 1;
+    const ppnAmount = Math.round(rawLinePpn * discountFactor);
+    const ppnRate = dpp > 0 ? Number(((ppnAmount / dpp) * 100).toFixed(2)) : 0;
 
-    // PPh
-    let pphRate = Number(pphRateVal) || 0;
-    if (pphTypeVal === 'Non-PPh') {
-      pphRate = 0;
+    // PPh (hanya dihitung jika checkbox dicentang)
+    let pphAmount = 0;
+    let effectivePphType = 'Non-PPh';
+    let effectivePphRate = 0;
+    let pphCoaAccount = '';
+
+    if (hasPphVal) {
+      effectivePphType = pphTypeVal && pphTypeVal !== 'Non-PPh' ? pphTypeVal : 'PPh 23';
+      const coaInfo = PPH_COA_MAP[effectivePphType];
+      effectivePphRate = Number(pphRateVal) || (coaInfo ? coaInfo.defaultRate : 2.0);
+      pphCoaAccount = coaInfo ? coaInfo.coaCode : '2113';
+
+      const vendor = vendorList.find(v => v.id === (vendorIdVal || formData.vendorId)) || 
+        (lastCreatedVendor && lastCreatedVendor.id === (vendorIdVal || formData.vendorId) ? lastCreatedVendor : null);
+      const hasNpwp = vendor ? vendor.hasNpwp : true;
+
+      const taxCalc = calculateTax({
+        taxType: effectivePphType,
+        baseRate: effectivePphRate,
+        hasNpwp,
+        dpp
+      });
+      pphAmount = taxCalc.taxAmount;
     }
 
-    const taxCalc = calculateTax({
-      taxType: pphTypeVal,
-      baseRate: pphRate,
-      hasNpwp,
-      dpp
-    });
-
-    const pphAmount = taxCalc.taxAmount;
     const totalPayable = dpp + ppnAmount - pphAmount;
     const grandTotal = dpp + ppnAmount;
 
@@ -246,9 +316,11 @@ export default function PurchaseModule({
       dpp,
       ppnRate,
       ppnAmount,
-      pphType: pphTypeVal,
-      pphRate,
+      hasPph: Boolean(hasPphVal),
+      pphType: effectivePphType,
+      pphRate: effectivePphRate,
       pphAmount,
+      pphCoaAccount,
       totalPayable,
       grandTotal
     };
@@ -269,7 +341,47 @@ export default function PurchaseModule({
     const calculated = recalculateTotals(
       newItems,
       formData.discount,
-      formData.ppnRate,
+      formData.hasPph,
+      formData.pphType,
+      formData.pphRate,
+      formData.vendorId
+    );
+
+    setFormData({
+      ...formData,
+      items: newItems,
+      ...calculated
+    });
+  };
+
+  // Handler saat produk dipilih dari katalog produk
+  const handleProductSelect = (index, productId) => {
+    const newItems = [...formData.items];
+    const item = { ...newItems[index] };
+
+    if (!productId || productId === 'custom') {
+      item.productId = productId === 'custom' ? 'custom' : '';
+      newItems[index] = item;
+      setFormData(prev => ({ ...prev, items: newItems }));
+      return;
+    }
+
+    const prod = productList.find(p => p.id === productId);
+    if (prod) {
+      item.productId = prod.id;
+      item.description = prod.name;
+      item.unit = prod.unit || item.unit || 'Unit';
+      item.unitPrice = Number(prod.purchasePrice) || 0;
+      item.taxRate = Number(prod.purchaseTaxType) || 0;
+      item.coaId = prod.purchaseAccountCode || formData.coaDebitAccount || '6105';
+      item.subtotal = (Number(item.qty) || 1) * item.unitPrice;
+    }
+
+    newItems[index] = item;
+    const calculated = recalculateTotals(
+      newItems,
+      formData.discount,
+      formData.hasPph,
       formData.pphType,
       formData.pphRate,
       formData.vendorId
@@ -285,7 +397,7 @@ export default function PurchaseModule({
   const handleAddItem = () => {
     const newItems = [
       ...formData.items,
-      { id: `item-${Date.now()}`, description: '', coaId: formData.coaDebitAccount || '6103', qty: 1, unit: 'Unit', unitPrice: 0, subtotal: 0 }
+      { id: `item-${Date.now()}`, productId: '', description: '', coaId: formData.coaDebitAccount || '6105', qty: 1, unit: 'Unit', unitPrice: 0, taxRate: 0, subtotal: 0 }
     ];
     setFormData({ ...formData, items: newItems });
   };
@@ -296,7 +408,7 @@ export default function PurchaseModule({
     const calculated = recalculateTotals(
       newItems,
       formData.discount,
-      formData.ppnRate,
+      formData.hasPph,
       formData.pphType,
       formData.pphRate,
       formData.vendorId
@@ -385,7 +497,7 @@ export default function PurchaseModule({
       const calculated = recalculateTotals(
         formData.items,
         formData.discount,
-        formData.ppnRate,
+        formData.hasPph,
         defaultPph,
         defaultRate,
         vendorToSave.id
@@ -420,26 +532,31 @@ export default function PurchaseModule({
     let defaultPph = formData.pphType;
     let defaultRate = formData.pphRate;
 
-    if (v) {
-      if (v.category === 'Sewa & Gedung') {
-        defaultPph = 'PPh 4(2)';
-        defaultRate = 10.0;
-      } else if (v.category === 'Konstruksi & Renovasi') {
-        defaultPph = 'PPh 4(2)';
-        defaultRate = 1.75;
-      } else if (v.type === 'Orang Pribadi') {
-        defaultPph = 'PPh 21';
-        defaultRate = 2.5;
-      } else {
-        defaultPph = 'PPh 23';
-        defaultRate = 2.0;
+    if (formData.hasPph) {
+      if (v) {
+        if (v.category === 'Sewa & Gedung') {
+          defaultPph = 'PPh 4(2)';
+          defaultRate = 10.0;
+        } else if (v.category === 'Konstruksi & Renovasi') {
+          defaultPph = 'PPh 4(2)';
+          defaultRate = 1.75;
+        } else if (v.type === 'Orang Pribadi') {
+          defaultPph = 'PPh 21';
+          defaultRate = 2.5;
+        } else {
+          defaultPph = 'PPh 23';
+          defaultRate = 2.0;
+        }
       }
+    } else {
+      defaultPph = 'Non-PPh';
+      defaultRate = 0;
     }
 
     const calculated = recalculateTotals(
       formData.items,
       formData.discount,
-      formData.ppnRate,
+      formData.hasPph,
       defaultPph,
       defaultRate,
       vId
@@ -456,17 +573,13 @@ export default function PurchaseModule({
   };
 
   const handlePphTypeSelect = (type) => {
-    let rate = 0;
-    if (type === 'PPh 23') rate = 2.0;
-    else if (type === 'PPh 21') rate = 2.5;
-    else if (type === 'PPh 22') rate = 1.5;
-    else if (type === 'PPh 4(2)') rate = 10.0;
-    else rate = 0;
+    const coaInfo = PPH_COA_MAP[type];
+    const rate = coaInfo ? coaInfo.defaultRate : 0;
 
     const calculated = recalculateTotals(
       formData.items,
       formData.discount,
-      formData.ppnRate,
+      formData.hasPph,
       type,
       rate,
       formData.vendorId
@@ -1188,22 +1301,57 @@ export default function PurchaseModule({
               {/* Line Items Builder */}
               <div className="border border-slate-200 rounded-xl p-3.5 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                    Rincian Item Pengadaan (Line Items)
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                      Rincian Item Pengadaan (Line Items)
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      (Pilih produk katalog atau input manual, dan tentukan PPN per item)
+                    </span>
+                  </div>
                   <button
                     type="button"
                     onClick={handleAddItem}
-                    className="text-xs text-emerald-600 hover:text-emerald-700 font-bold flex items-center gap-1"
+                    className="text-xs text-emerald-600 hover:text-emerald-700 font-bold flex items-center gap-1 cursor-pointer"
                   >
                     + Tambah Baris
                   </button>
                 </div>
 
+                {/* Table Headers */}
+                <div className="hidden md:grid grid-cols-12 gap-2 px-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  <div className="col-span-3">Produk (Katalog)</div>
+                  <div className="col-span-3">Deskripsi Item</div>
+                  <div className="col-span-1 text-center">Qty</div>
+                  <div className="col-span-1 text-center">Satuan</div>
+                  <div className="col-span-2 text-right">Harga Satuan</div>
+                  <div className="col-span-1 text-center">Pajak PPN</div>
+                  <div className="col-span-1 text-right">Aksi</div>
+                </div>
+
                 <div className="space-y-2">
                   {formData.items.map((item, index) => (
-                    <div key={item.id || index} className="grid grid-cols-12 gap-2 items-center bg-slate-50 p-2 rounded-lg border border-slate-200">
-                      <div className="col-span-4">
+                    <div key={item.id || index} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                      {/* 1. Dropdown Produk (Menggantikan COA) */}
+                      <div className="md:col-span-3">
+                        <select
+                          value={item.productId || ''}
+                          onChange={(e) => handleProductSelect(index, e.target.value)}
+                          className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500 font-bold text-slate-800"
+                          title="Pilih Produk dari Master Produk"
+                        >
+                          <option value="">Pilih Produk...</option>
+                          <option value="custom">-- Input Manual / Non-Katalog --</option>
+                          {productList.map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.code} - {p.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* 2. Deskripsi Item */}
+                      <div className="md:col-span-3">
                         <input
                           type="text"
                           required
@@ -1213,24 +1361,9 @@ export default function PurchaseModule({
                           className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
-                      <div className="col-span-3">
-                        <select
-                          value={item.coaId}
-                          onChange={(e) => handleItemChange(index, 'coaId', e.target.value)}
-                          className="w-full px-2 py-1.5 text-[11px] bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                          title="Alokasi Akun COA"
-                        >
-                          <option value="">Pilih COA...</option>
-                          {coaList
-                            .filter(a => a.category === 'Expense' || a.category === 'Asset')
-                            .map(a => (
-                              <option key={a.id} value={a.code}>
-                                {a.code} - {a.name}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-                      <div className="col-span-1">
+
+                      {/* 3. Qty */}
+                      <div className="md:col-span-1">
                         <input
                           type="number"
                           min="1"
@@ -1240,7 +1373,9 @@ export default function PurchaseModule({
                           className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-center font-bold"
                         />
                       </div>
-                      <div className="col-span-1">
+
+                      {/* 4. Satuan */}
+                      <div className="md:col-span-1">
                         <input
                           type="text"
                           placeholder="Satuan"
@@ -1249,20 +1384,42 @@ export default function PurchaseModule({
                           className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-center"
                         />
                       </div>
-                      <div className="col-span-2">
+
+                      {/* 5. Harga Satuan */}
+                      <div className="md:col-span-2">
                         <input
                           type="number"
                           placeholder="Harga Satuan"
                           value={item.unitPrice}
                           onChange={(e) => handleItemChange(index, 'unitPrice', e.target.value)}
-                          className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-right font-mono"
+                          className="w-full px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-right font-mono font-semibold"
                         />
                       </div>
-                      <div className="col-span-1 flex items-center justify-end">
+
+                      {/* 6. Dropdown Pajak (1.1%, 11%) - PPN per baris */}
+                      <div className="md:col-span-1">
+                        <select
+                          value={item.taxRate !== undefined ? item.taxRate : 0}
+                          onChange={(e) => handleItemChange(index, 'taxRate', Number(e.target.value))}
+                          className="w-full px-1.5 py-1.5 text-[11px] bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500 font-semibold"
+                          title="Pilih Pajak (Bukan keharusan: Non-PPN, 1.1%, 11%)"
+                        >
+                          <option value={0}>0%</option>
+                          <option value={1.1}>1.1%</option>
+                          <option value={11}>11%</option>
+                          <option value={12}>12%</option>
+                        </select>
+                      </div>
+
+                      {/* 7. Subtotal & Hapus Baris */}
+                      <div className="md:col-span-1 flex items-center justify-between gap-1">
+                        <span className="text-[10px] font-mono font-bold text-slate-700 hidden md:inline truncate">
+                          {formatRupiah(item.subtotal)}
+                        </span>
                         <button
                           type="button"
                           onClick={() => handleRemoveItem(index)}
-                          className="p-1 text-slate-400 hover:text-rose-600 rounded transition"
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
                           title="Hapus Baris"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -1275,95 +1432,129 @@ export default function PurchaseModule({
 
               {/* Taxation & Calculation Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                {/* Tax Selectors */}
+                {/* Tax & Withholding Section */}
                 <div className="space-y-3">
                   <span className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
                     Ketentuan Pajak & Pemotongan (Withholding)
                   </span>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Tarif PPN
-                      </label>
-                      <select
-                        value={formData.ppnRate}
+                  {/* Box Ceklis PPh */}
+                  <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-xs space-y-3">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(formData.hasPph)}
                         onChange={(e) => {
-                          const rate = Number(e.target.value);
+                          const checked = e.target.checked;
+                          const pphType = checked ? (formData.pphType !== 'Non-PPh' ? formData.pphType : 'PPh 23') : 'Non-PPh';
+                          const defaultRate = PPH_COA_MAP[pphType]?.defaultRate || 2.0;
+                          const pphRate = checked ? (formData.pphRate > 0 ? formData.pphRate : defaultRate) : 0;
                           const calculated = recalculateTotals(
                             formData.items,
                             formData.discount,
-                            rate,
-                            formData.pphType,
-                            formData.pphRate,
+                            checked,
+                            pphType,
+                            pphRate,
                             formData.vendorId
                           );
-                          setFormData({ ...formData, ppnRate: rate, ...calculated });
+                          setFormData({
+                            ...formData,
+                            hasPph: checked,
+                            ...calculated
+                          });
                         }}
-                        className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 font-semibold"
-                      >
-                        <option value={0}>0% (Bebas PPN / Non-PPN)</option>
-                        <option value={11}>11% (PPN Standar)</option>
-                        <option value={12}>12% (PPN Terkini)</option>
-                      </select>
-                    </div>
+                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer"
+                      />
+                      <div>
+                        <span className="text-xs font-bold text-slate-800">
+                          Potong Pajak Penghasilan (PPh Withholding)
+                        </span>
+                        <p className="text-[11px] text-slate-500">
+                          Centang untuk memotong PPh Pasal 23, 21, 22, 25, atau 4(2) Final
+                        </p>
+                      </div>
+                    </label>
 
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Jenis PPh Dipotong
-                      </label>
-                      <select
-                        value={formData.pphType}
-                        onChange={(e) => handlePphTypeSelect(e.target.value)}
-                        className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 font-bold"
-                      >
-                        {TAX_TYPES.map(t => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
-                      </select>
-                    </div>
+                    {/* JIKA DICEKLIS: MUNCULKAN JENIS PPH & TARIF TERDAFTAR DI COA */}
+                    {formData.hasPph && (
+                      <div className="pt-3 border-t border-purple-100 space-y-3 animate-in fade-in duration-150">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                              Jenis PPh Dipotong *
+                            </label>
+                            <select
+                              value={formData.pphType}
+                              onChange={(e) => handlePphTypeSelect(e.target.value)}
+                              className="w-full px-2.5 py-1.5 text-xs bg-purple-50/50 border border-purple-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-500 font-bold text-purple-900"
+                            >
+                              {Object.entries(PPH_COA_MAP).map(([key, info]) => (
+                                <option key={key} value={key}>
+                                  {info.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                              Tarif Pajak {formData.pphType} (%)
+                            </label>
+                            <div className="flex items-center gap-1 font-mono font-bold text-purple-800">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={formData.pphRate}
+                                onChange={(e) => {
+                                  const r = Number(e.target.value);
+                                  const calculated = recalculateTotals(
+                                    formData.items,
+                                    formData.discount,
+                                    true,
+                                    formData.pphType,
+                                    r,
+                                    formData.vendorId
+                                  );
+                                  setFormData({ ...formData, pphRate: r, ...calculated });
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-purple-300 rounded-lg text-right font-bold"
+                              />
+                              <span className="text-xs font-bold text-slate-600">%</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* COA Link Info Banner */}
+                        <div className="p-2.5 bg-purple-50/80 rounded-lg border border-purple-200 text-xs text-purple-900 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="px-1.5 py-0.5 bg-purple-200/90 text-purple-900 font-mono font-extrabold text-[10px] rounded">
+                              COA {PPH_COA_MAP[formData.pphType]?.coaCode || '2113'}
+                            </span>
+                            <span className="font-semibold text-[11px]">
+                              {PPH_COA_MAP[formData.pphType]?.coaName || 'Hutang Pajak PPh'}
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-mono font-bold text-purple-800">
+                            -{formatRupiah(formData.pphAmount)}
+                          </span>
+                        </div>
+
+                        {selectedVendor && !selectedVendor.hasNpwp && (
+                          <div className="text-[10px] text-amber-700 font-medium flex items-center gap-1">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                            <span>Tarif sanksi non-NPWP otomatis diterapkan (+20% PPh 21 / +100% PPh 23).</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  {formData.pphType !== 'Non-PPh' && (
-                    <div className="p-3 bg-white rounded-lg border border-purple-200 space-y-1 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-600 font-medium">Tarif Pajak {formData.pphType}:</span>
-                        <div className="flex items-center gap-1 font-mono font-bold text-purple-800">
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={formData.pphRate}
-                            onChange={(e) => {
-                              const r = Number(e.target.value);
-                              const calculated = recalculateTotals(
-                                formData.items,
-                                formData.discount,
-                                formData.ppnRate,
-                                formData.pphType,
-                                r,
-                                formData.vendorId
-                              );
-                              setFormData({ ...formData, pphRate: r, ...calculated });
-                            }}
-                            className="w-16 px-1.5 py-0.5 text-xs border border-purple-300 rounded text-right"
-                          />
-                          <span>%</span>
-                        </div>
-                      </div>
-                      {selectedVendor && !selectedVendor.hasNpwp && (
-                        <div className="text-[10px] text-amber-700 font-medium flex items-center gap-1 mt-1">
-                          <AlertTriangle className="w-3 h-3 text-amber-600" />
-                          Tarif sanksi non-NPWP otomatis diterapkan (+20% PPh 21 / +100% PPh 23).
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   {/* COA Accounts Integration */}
-                  <div className="grid grid-cols-2 gap-3 pt-2">
+                  <div className="grid grid-cols-2 gap-3 pt-1">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Akun Debet (Beban / Aset)
+                        Akun Debet Utama (Beban / Aset)
                       </label>
                       <select
                         value={formData.coaDebitAccount}
@@ -1377,7 +1568,7 @@ export default function PurchaseModule({
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                        Akun Kredit (Kas / Hutang)
+                        Akun Kredit Utama (Hutang Usaha)
                       </label>
                       <select
                         value={formData.coaCreditAccount}
@@ -1409,7 +1600,7 @@ export default function PurchaseModule({
                           const calculated = recalculateTotals(
                             formData.items,
                             d,
-                            formData.ppnRate,
+                            formData.hasPph,
                             formData.pphType,
                             formData.pphRate,
                             formData.vendorId
@@ -1424,10 +1615,12 @@ export default function PurchaseModule({
                       <span className="font-mono">{formatRupiah(formData.dpp)}</span>
                     </div>
                     <div className="flex justify-between text-slate-600">
-                      <span>PPN ({formData.ppnRate}%):</span>
-                      <span className="font-mono font-semibold">+ {formatRupiah(formData.ppnAmount)}</span>
+                      <span>PPN (dari Line Items):</span>
+                      <span className="font-mono font-semibold text-emerald-700">
+                        {formData.ppnAmount > 0 ? `+ ${formatRupiah(formData.ppnAmount)}` : 'Rp0 (Non-PPN)'}
+                      </span>
                     </div>
-                    {formData.pphType !== 'Non-PPh' && (
+                    {formData.hasPph && formData.pphAmount > 0 && (
                       <div className="flex justify-between text-purple-700 font-semibold">
                         <span>Potongan {formData.pphType} ({formData.pphRate}%):</span>
                         <span className="font-mono">- {formatRupiah(formData.pphAmount)}</span>

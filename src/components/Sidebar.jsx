@@ -11,7 +11,8 @@ import {
   CheckCircle2,
   UserCheck,
   Shield,
-  Building2
+  Building2,
+  Package
 } from 'lucide-react';
 import { useAuth } from '../lib/authContext';
 
@@ -36,6 +37,13 @@ export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, 
       label: '2. Modul Supplier/Vendor', 
       icon: Users2,
       badge: stats?.vendorCount || 0
+    },
+    { 
+      id: 'products', 
+      label: 'Master Produk & Jasa', 
+      sub: 'Katalog Barang & Jasa',
+      icon: Package,
+      badge: stats?.productCount || 0
     },
     { 
       id: 'purchases', 

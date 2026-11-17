@@ -92,10 +92,10 @@ export default function PurchasePrintPreviewModal({ pr, vendor, coaList, onClose
                 <tr className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200">
                   <th className="py-2.5 px-3 w-8 text-center">No</th>
                   <th className="py-2.5 px-3">Deskripsi Barang / Jasa</th>
-                  <th className="py-2.5 px-3">Alokasi COA</th>
                   <th className="py-2.5 px-3 text-center">Qty</th>
                   <th className="py-2.5 px-3 text-center">Satuan</th>
                   <th className="py-2.5 px-3 text-right">Harga Satuan</th>
+                  <th className="py-2.5 px-3 text-center">PPN</th>
                   <th className="py-2.5 px-3 text-right">Total</th>
                 </tr>
               </thead>
@@ -105,10 +105,10 @@ export default function PurchasePrintPreviewModal({ pr, vendor, coaList, onClose
                     <tr key={it.id || idx}>
                       <td className="py-2.5 px-3 text-center text-slate-500">{idx + 1}</td>
                       <td className="py-2.5 px-3 font-semibold text-slate-800">{it.description}</td>
-                      <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600">{it.coaId || '-'}</td>
                       <td className="py-2.5 px-3 text-center font-bold text-slate-800">{it.qty}</td>
                       <td className="py-2.5 px-3 text-center text-slate-600">{it.unit}</td>
                       <td className="py-2.5 px-3 text-right font-mono">{formatRupiah(it.unitPrice)}</td>
+                      <td className="py-2.5 px-3 text-center text-emerald-700 font-semibold">{it.taxRate ? `${it.taxRate}%` : '0%'}</td>
                       <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">{formatRupiah(it.subtotal)}</td>
                     </tr>
                   ))

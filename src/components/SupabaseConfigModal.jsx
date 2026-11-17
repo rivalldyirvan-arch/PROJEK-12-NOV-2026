@@ -160,9 +160,34 @@ CREATE TABLE IF NOT EXISTS app_users (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY,
+    code TEXT UNIQUE NOT NULL,
+    barcode TEXT,
+    name TEXT NOT NULL,
+    description TEXT,
+    unit TEXT NOT NULL DEFAULT 'Pcs',
+    category TEXT,
+    product_type TEXT NOT NULL DEFAULT 'Barang',
+    image_url TEXT,
+    is_purchased BOOLEAN DEFAULT TRUE,
+    purchase_price NUMERIC DEFAULT 0,
+    purchase_account_code TEXT,
+    purchase_tax_type NUMERIC DEFAULT 0,
+    is_sold BOOLEAN DEFAULT FALSE,
+    selling_price NUMERIC DEFAULT 0,
+    sales_account_code TEXT,
+    sales_tax_type NUMERIC DEFAULT 0,
+    discount_account_code TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Buka izin akses RLS:
 ALTER TABLE coa ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vendors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE purchase_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tax_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_roles ENABLE ROW LEVEL SECURITY;
@@ -170,6 +195,7 @@ ALTER TABLE app_users ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public all access on coa" ON coa FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on vendors" ON vendors FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on products" ON products FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on purchase_requests" ON purchase_requests FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on tax_records" ON tax_records FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on app_roles" ON app_roles FOR ALL USING (true) WITH CHECK (true);

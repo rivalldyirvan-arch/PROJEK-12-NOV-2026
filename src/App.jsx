@@ -11,11 +11,13 @@ import TaxModule from './pages/TaxModule';
 import TaxCalculatorTab from './pages/TaxCalculatorTab';
 import UserModule from './pages/UserModule';
 import AssetModule from './pages/AssetModule';
+import ProductModule from './pages/ProductModule';
 import LoginPage from './pages/LoginPage';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { 
   fetchCOA, 
   fetchVendors, 
+  fetchProducts,
   fetchPurchaseRequests, 
   fetchTaxRecords, 
   fetchFixedAssets,
@@ -38,6 +40,7 @@ function MainAppContent() {
   // Core Data Lists
   const [coaList, setCoaList] = useState([]);
   const [vendorList, setVendorList] = useState([]);
+  const [productList, setProductList] = useState([]);
   const [purchaseRequests, setPurchaseRequests] = useState([]);
   const [taxRecords, setTaxRecords] = useState([]);
   
@@ -59,9 +62,10 @@ function MainAppContent() {
       setLoading(true);
     }
     try {
-      const [coa, vendors, purchases, taxes, assets, categories, journals, postings, movements, disposals, conn] = await Promise.all([
+      const [coa, vendors, products, purchases, taxes, assets, categories, journals, postings, movements, disposals, conn] = await Promise.all([
         fetchCOA(),
         fetchVendors(),
+        fetchProducts(),
         fetchPurchaseRequests(),
         fetchTaxRecords(),
         fetchFixedAssets(),
@@ -75,6 +79,7 @@ function MainAppContent() {
 
       setCoaList(coa || []);
       setVendorList(vendors || []);
+      setProductList(products || []);
       setPurchaseRequests(purchases || []);
       setTaxRecords(taxes || []);
       setAssetList(assets || []);
@@ -120,6 +125,7 @@ function MainAppContent() {
   const stats = {
     coaCount: coaList.length,
     vendorCount: vendorList.length,
+    productCount: productList.length,
     pendingPrCount: purchaseRequests.filter(p => p.status === 'Menunggu Persetujuan').length,
     taxRecordsCount: taxRecords.length,
     assetCount: assetList.length
@@ -183,10 +189,20 @@ function MainAppContent() {
                 />
               )}
 
+              {activeTab === 'products' && (
+                <ProductModule 
+                  productList={productList}
+                  coaList={coaList}
+                  onRefresh={loadData}
+                  showToast={showToast}
+                />
+              )}
+
               {activeTab === 'purchases' && (
                 <PurchaseModule 
                   purchaseRequests={purchaseRequests}
                   vendorList={vendorList}
+                  productList={productList}
                   coaList={coaList}
                   onRefresh={loadData}
                   showToast={showToast}

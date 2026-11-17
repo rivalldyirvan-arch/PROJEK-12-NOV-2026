@@ -27,6 +27,7 @@ export const INITIAL_COA = [
   { id: '2113', code: '2113', name: 'Hutang Pajak - PPh 23 Jasa/Sewa', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 6200000, isActive: true },
   { id: '2114', code: '2114', name: 'Hutang Pajak - PPh 4 Ayat (2) Final', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 14500000, isActive: true },
   { id: '2115', code: '2115', name: 'Hutang Pajak - PPN Keluaran', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 28000000, isActive: true },
+  { id: '2116', code: '2116', name: 'Hutang Pajak - PPh 25 Angsuran', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 5000000, isActive: true },
 
   // 3. EKUITAS
   { id: '3101', code: '3101', name: 'Modal Disetor', category: 'Equity', subCategory: 'Modal', normalBalance: 'Credit', level: 3, parentCode: '3100', balance: 500000000, isActive: true },
@@ -35,6 +36,8 @@ export const INITIAL_COA = [
   // 4. PENDAPATAN
   { id: '4101', code: '4101', name: 'Pendapatan Jasa & Proyek', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Credit', level: 3, parentCode: '4100', balance: 650000000, isActive: true },
   { id: '4102', code: '4102', name: 'Pendapatan Lisensi & Pemeliharaan', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Credit', level: 3, parentCode: '4100', balance: 180000000, isActive: true },
+  { id: '4-41100', code: '4-41100', name: 'Pendapatan Mitra', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Credit', level: 3, parentCode: '4100', balance: 215000000, isActive: true },
+  { id: '4-40201', code: '4-40201', name: 'Unbilled Revenues / Diskon Penjualan', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Debit', level: 3, parentCode: '4100', balance: 12000000, isActive: true },
 
   // 5. BEBAN POKOK PENJUALAN (HPP)
   { id: '5101', code: '5101', name: 'Beban Subkontraktor & Jasa Ahli Proyek', category: 'Expense', subCategory: 'HPP', normalBalance: 'Debit', level: 3, parentCode: '5100', balance: 140000000, isActive: true },
@@ -475,4 +478,113 @@ export const INITIAL_TAX_RECORDS = [
     notes: 'Pemungutan PPh 22 atas pengadaan jaringan optik terintegrasi.'
   }
 ];
+
+export const INITIAL_PRODUCTS = [
+  {
+    id: 'prd-1',
+    code: 'PRD-ATK-001',
+    barcode: '899100123001',
+    name: 'Kertas HVS A4 80gr Sinar Dunia (Rim)',
+    description: 'Kertas HVS ukuran A4 80 gram kualitas prima untuk printer laser & fotokopi, isi 500 lembar per rim.',
+    unit: 'Rim',
+    category: 'Alat Tulis Kantor',
+    productType: 'Barang',
+    imageUrl: '',
+    isPurchased: true,
+    purchasePrice: 55000,
+    purchaseAccountCode: '6105', // Beban Perlengkapan & ATK Kantor
+    purchaseTaxType: 11, // PPN 11%
+    isSold: false,
+    sellingPrice: 0,
+    salesAccountCode: '4101',
+    salesTaxType: 0,
+    discountAccountCode: '4-40201',
+    isActive: true
+  },
+  {
+    id: 'prd-2',
+    code: 'PRD-IT-002',
+    barcode: '899200543002',
+    name: 'Laptop Dell Vostro Core i7 16GB SSD 512GB',
+    description: 'Perangkat komputer kerja bisnis Dell Vostro Intel Core i7 13th Gen, RAM 16GB DDR5, SSD 512GB NVMe, Windows 11 Pro.',
+    unit: 'Unit',
+    category: 'Perangkat IT & Komputer',
+    productType: 'Barang',
+    imageUrl: '',
+    isPurchased: true,
+    purchasePrice: 14500000,
+    purchaseAccountCode: '1205', // Peralatan Kantor & Komputer (Aset)
+    purchaseTaxType: 11,
+    isSold: true,
+    sellingPrice: 17200000,
+    salesAccountCode: '4-41100', // Pendapatan Mitra
+    salesTaxType: 11,
+    discountAccountCode: '4-40201',
+    isActive: true
+  },
+  {
+    id: 'prd-3',
+    code: 'JSA-TAX-003',
+    barcode: '',
+    name: 'Jasa Konsultan Pajak & Audit Laporan Keuangan',
+    description: 'Jasa asistensi kepatuhan perpajakan bulanan SPT Masa PPh & PPN serta review rekonsiliasi fiskal tahunan.',
+    unit: 'Bulan',
+    category: 'Jasa Konsultan',
+    productType: 'Jasa',
+    imageUrl: '',
+    isPurchased: true,
+    purchasePrice: 15000000,
+    purchaseAccountCode: '6103', // Beban Konsultan Hukum, Pajak & Akuntansi
+    purchaseTaxType: 11,
+    isSold: true,
+    sellingPrice: 20000000,
+    salesAccountCode: '4101', // Pendapatan Jasa & Proyek
+    salesTaxType: 11,
+    discountAccountCode: '4-40201',
+    isActive: true
+  },
+  {
+    id: 'prd-4',
+    code: 'JSA-BLD-004',
+    barcode: '',
+    name: 'Sewa Ruang Kantor & Service Charge Gedung',
+    description: 'Biaya sewa ruang kantor operasional 250m2 termasuk fasilitas air, AC sentral, dan keamanan gedung.',
+    unit: 'Bulan',
+    category: 'Sewa Gedung',
+    productType: 'Jasa',
+    imageUrl: '',
+    isPurchased: true,
+    purchasePrice: 40000000,
+    purchaseAccountCode: '6102', // Beban Sewa Gedung & Ruang Kantor
+    purchaseTaxType: 11,
+    isSold: false,
+    sellingPrice: 0,
+    salesAccountCode: '4101',
+    salesTaxType: 0,
+    discountAccountCode: '4-40201',
+    isActive: true
+  },
+  {
+    id: 'prd-5',
+    code: 'JSA-REN-005',
+    barcode: '',
+    name: 'Pekerjaan Renovasi Partisi & Instalasi Listrik',
+    description: 'Pekerjaan perbaikan ruangan, partisi kaca tempered 10mm, dan peremajaan instalasi kelistrikan kantor.',
+    unit: 'Paket',
+    category: 'Pemeliharaan & Renovasi',
+    productType: 'Jasa',
+    imageUrl: '',
+    isPurchased: true,
+    purchasePrice: 22000000,
+    purchaseAccountCode: '6107', // Beban Pemeliharaan & Renovasi Kantor
+    purchaseTaxType: 1.1, // PPN 1.1%
+    isSold: false,
+    sellingPrice: 0,
+    salesAccountCode: '4101',
+    salesTaxType: 0,
+    discountAccountCode: '4-40201',
+    isActive: true
+  }
+];
+
 

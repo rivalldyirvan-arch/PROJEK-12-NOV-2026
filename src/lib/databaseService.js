@@ -1,11 +1,13 @@
 import { getSupabase } from './supabase';
 import { INITIAL_USERS, INITIAL_ROLES } from './initialUsers';
+import { INITIAL_PRODUCTS } from './initialData';
 import { INITIAL_ASSET_CATEGORIES, calculateCommercialDepreciationSchedule, calculateTaxDepreciationSchedule } from './assetCalculator';
 
 const STORAGE_KEYS = {
   COA: 'app_coa_data',
   VENDORS: 'app_vendors_data',
   PURCHASES: 'app_purchases_data',
+  PRODUCTS: 'app_products_data',
   TAX: 'app_tax_data',
   USERS: 'app_users_data',
   ROLES: 'app_roles_data',
@@ -1971,4 +1973,149 @@ export async function executeAssetDisposal({
     updatedAsset
   };
 }
+
+// ==============================================================================
+// 7. MODUL MASTER PRODUK & JASA (PRODUCTS)
+// ==============================================================================
+export async function fetchProducts() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('products').select('*').order('code', { ascending: true });
+      if (!error && data && data.length > 0) {
+        return data.map(item => ({
+          id: item.id,
+          code: item.code,
+          barcode: item.barcode || '',
+          name: item.name,
+          description: item.description || '',
+          unit: item.unit || 'Pcs',
+          category: item.category || 'Umum',
+          productType: item.product_type || 'Barang',
+          imageUrl: item.image_url || '',
+          isPurchased: item.is_purchased !== false,
+          purchasePrice: Number(item.purchase_price || 0),
+          purchaseAccountCode: item.purchase_account_code || '6105',
+          purchaseTaxType: Number(item.purchase_tax_type || 0),
+          isSold: Boolean(item.is_sold),
+          sellingPrice: Number(item.selling_price || 0),
+          salesAccountCode: item.sales_account_code || '4101',
+          salesTaxType: Number(item.sales_tax_type || 0),
+          discountAccountCode: item.discount_account_code || '4-40201',
+          isActive: item.is_active !== false,
+          createdAt: item.created_at,
+          updatedAt: item.updated_at
+        }));
+      }
+      if (error && error.code !== 'PGRST116') {
+        console.warn('Supabase fetch products error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Error reading products from Supabase:', err);
+    }
+  }
+
+  return getLocal(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS);
+}
+
+export async function saveProduct(product) {
+  const supabase = getSupabase();
+  const id = product.id || `prod-${Date.now()}`;
+  const now = new Date().toISOString();
+  
+  const productData = {
+    ...product,
+    id,
+    purchasePrice: Number(product.purchasePrice || 0),
+    sellingPrice: Number(product.sellingPrice || 0),
+    purchaseTaxType: Number(product.purchaseTaxType || 0),
+    salesTaxType: Number(product.salesTaxType || 0),
+    updatedAt: now
+  };
+
+  if (supabase) {
+    try {
+      const dbPayload = {
+        id: productData.id,
+        code: productData.code,
+        barcode: productData.barcode || null,
+        name: productData.name,
+        description: productData.description || null,
+        unit: productData.unit || 'Pcs',
+        category: productData.category || null,
+        product_type: productData.productType || 'Barang',
+        image_url: productData.imageUrl || null,
+        is_purchased: productData.isPurchased !== false,
+        purchase_price: productData.purchasePrice,
+        purchase_account_code: productData.purchaseAccountCode || null,
+        purchase_tax_type: productData.purchaseTaxType,
+        is_sold: Boolean(productData.isSold),
+        selling_price: productData.sellingPrice,
+        sales_account_code: productData.salesAccountCode || null,
+        sales_tax_type: productData.salesTaxType,
+        discount_account_code: productData.discountAccountCode || null,
+        is_active: productData.isActive !== false,
+        updated_at: now
+      };
+
+      const { data, error } = await supabase
+        .from('products')
+        .upsert(dbPayload, { onConflict: 'id' })
+        .select()
+        .single();
+
+      if (!error && data) {
+        const localList = getLocal(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS);
+        const index = localList.findIndex(p => p.id === id || p.code === product.code);
+        let updated;
+        if (index >= 0) {
+          updated = [...localList];
+          updated[index] = productData;
+        } else {
+          updated = [productData, ...localList];
+        }
+        setLocal(STORAGE_KEYS.PRODUCTS, updated);
+        return productData;
+      }
+      if (error) {
+        console.warn('Supabase save product error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Error saving product to Supabase:', err);
+    }
+  }
+
+  // Fallback to local
+  const localList = getLocal(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS);
+  const index = localList.findIndex(p => p.id === id || p.code === product.code);
+  let updated;
+  if (index >= 0) {
+    updated = [...localList];
+    updated[index] = productData;
+  } else {
+    updated = [productData, ...localList];
+  }
+  setLocal(STORAGE_KEYS.PRODUCTS, updated);
+  return productData;
+}
+
+export async function deleteProduct(id) {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { error } = await supabase.from('products').delete().eq('id', id);
+      if (error) {
+        console.warn('Supabase delete product error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Error deleting product from Supabase:', err);
+    }
+  }
+
+  const localList = getLocal(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS);
+  const filtered = localList.filter(p => p.id !== id);
+  setLocal(STORAGE_KEYS.PRODUCTS, filtered);
+  return true;
+}
+
 
