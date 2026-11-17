@@ -2668,125 +2668,145 @@ export default function PurchaseModule({
       {/* ═══════════════════════════════════════════════════════════════════════
           REVIEW POPUP — floating panel (fixed positioning)
       ════════════════════════════════════════════════════════════════════════ */}
-      {reviewPR && (
-        <div
-          ref={reviewRef}
-          className="fixed z-[200] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
-          style={{ top: reviewAnchor?.top ?? 100, left: reviewAnchor?.left ?? 100, minWidth: 280 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="bg-slate-900 px-4 py-3 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="font-bold text-white text-xs font-mono">{reviewPR.requestNumber}</div>
-              <div className="text-[10px] text-slate-400 truncate max-w-[200px]">{reviewPR.title}</div>
-            </div>
-            <button onClick={() => setReviewPR(null)} className="text-slate-400 hover:text-white p-0.5 rounded">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Body */}
-          <div className="p-2 space-y-1">
-
-            {/* 1. Tombol EDIT */}
-            <button
-              onClick={() => { setReviewPR(null); handleOpenEdit(reviewPR); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl transition text-left"
-            >
-              <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center flex-shrink-0">
-                <Edit3 className="w-3.5 h-3.5" />
+      {reviewPR && (() => {
+        // Sub-panel state di-manage dengan data attribute toggling
+        return (
+          <div
+            ref={reviewRef}
+            className="fixed z-[200] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-visible"
+            style={{ top: reviewAnchor?.top ?? 100, left: reviewAnchor?.left ?? 100, minWidth: 288 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="bg-slate-900 px-4 py-3 flex items-center justify-between gap-3 rounded-t-2xl">
+              <div className="min-w-0">
+                <div className="font-bold text-white text-xs font-mono">{reviewPR.requestNumber}</div>
+                <div className="text-[10px] text-slate-400 truncate max-w-[210px]">{reviewPR.title}</div>
               </div>
-              <div>
-                <div className="font-bold">Edit Pengajuan</div>
-                <div className="text-[10px] text-slate-400 font-normal">Ubah data dan simpan perubahan</div>
-              </div>
-            </button>
-
-            {/* 2. Dropdown CETAK */}
-            <div className="relative group">
-              <button className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 rounded-xl transition text-left">
-                <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0">
-                  <Printer className="w-3.5 h-3.5" />
-                </div>
-                <div className="flex-1">
-                  <div className="font-bold">Cetak</div>
-                  <div className="text-[10px] text-slate-400 font-normal">PDF atau Print dokumen</div>
-                </div>
-                <ChevronDown className="w-3 h-3 text-slate-400 group-hover:rotate-180 transition-transform" />
+              <button onClick={() => setReviewPR(null)} className="text-slate-400 hover:text-white p-0.5 rounded flex-shrink-0">
+                <X className="w-3.5 h-3.5" />
               </button>
-              {/* Sub-menu Cetak – tampil saat hover */}
-              <div className="hidden group-hover:block absolute left-0 top-full mt-0.5 bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden z-10 w-full">
-                <button
-                  onClick={() => { setReviewPR(null); setPrintPR({ ...reviewPR, outputMode: 'pdf' }); }}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 font-semibold transition"
-                >
-                  <FileText className="w-3.5 h-3.5 text-rose-500" />
-                  Ekspor PDF
-                </button>
-                <button
-                  onClick={() => { setReviewPR(null); setPrintPR({ ...reviewPR, outputMode: 'print' }); window.print?.(); }}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 font-semibold transition border-t border-slate-100"
-                >
-                  <Printer className="w-3.5 h-3.5 text-slate-500" />
-                  Print Langsung
-                </button>
-              </div>
             </div>
 
-            {/* 3. Dropdown TINDAKAN */}
-            <div className="relative group">
-              <button className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-amber-50 hover:text-amber-700 rounded-xl transition text-left">
-                <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0">
-                  <MoreVertical className="w-3.5 h-3.5" />
+            {/* Status Badge */}
+            <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                reviewPR.status === 'Lunas' ? 'bg-teal-100 text-teal-800 border-teal-200' :
+                reviewPR.status === 'Disetujui' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
+                reviewPR.status === 'Menunggu Persetujuan' ? 'bg-amber-100 text-amber-800 border-amber-200' :
+                reviewPR.status === 'Ditolak' ? 'bg-rose-100 text-rose-800 border-rose-200' :
+                'bg-slate-100 text-slate-700 border-slate-200'
+              }`}>{reviewPR.status}</span>
+              <span className="text-[10px] text-slate-400">{reviewPR.vendorName}</span>
+            </div>
+
+            {/* Body */}
+            <div className="p-2 space-y-0.5">
+
+              {/* 1. EDIT */}
+              <button
+                onClick={() => { setReviewPR(null); handleOpenEdit(reviewPR); }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl transition text-left group"
+              >
+                <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center flex-shrink-0 group-hover:bg-indigo-200 transition">
+                  <Edit3 className="w-4 h-4" />
                 </div>
-                <div className="flex-1">
-                  <div className="font-bold">Tindakan</div>
-                  <div className="text-[10px] text-slate-400 font-normal">Duplikat atau hapus pengajuan</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold leading-tight">Edit Pengajuan</div>
+                  <div className="text-[10px] text-slate-400 font-normal">Ubah data dan simpan perubahan</div>
                 </div>
-                <ChevronDown className="w-3 h-3 text-slate-400 group-hover:rotate-180 transition-transform" />
+                <ExternalLink className="w-3 h-3 text-slate-300 group-hover:text-indigo-400 flex-shrink-0" />
               </button>
-              <div className="hidden group-hover:block absolute left-0 top-full mt-0.5 bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden z-10 w-full">
-                <button
-                  onClick={() => handleDuplicate(reviewPR)}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-slate-700 hover:bg-amber-50 hover:text-amber-700 font-semibold transition"
-                >
-                  <Copy className="w-3.5 h-3.5 text-amber-500" />
-                  <div className="text-left">
-                    <div>Duplikat Pengajuan</div>
-                    <div className="text-[10px] text-slate-400 font-normal">Salin data, nomor baru otomatis</div>
+
+              {/* 2. CETAK (expanded inline) */}
+              <div className="rounded-xl overflow-hidden border border-slate-100">
+                <div className="flex items-center gap-3 px-3 py-2.5 bg-slate-50">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0">
+                    <Printer className="w-4 h-4" />
                   </div>
-                </button>
-                <button
-                  onClick={() => { setReviewPR(null); handleDelete(reviewPR); }}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-rose-600 hover:bg-rose-50 font-semibold transition border-t border-slate-100"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Hapus Pengajuan
-                </button>
+                  <div className="flex-1">
+                    <div className="text-xs font-bold text-slate-700">Cetak</div>
+                    <div className="text-[10px] text-slate-400">PDF atau print dokumen</div>
+                  </div>
+                </div>
+                <div className="flex border-t border-slate-100 divide-x divide-slate-100">
+                  <button
+                    onClick={() => { setReviewPR(null); setPrintPR({ ...reviewPR, outputMode: 'pdf' }); }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold text-rose-600 hover:bg-rose-50 transition"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    PDF
+                  </button>
+                  <button
+                    onClick={() => { setReviewPR(null); setPrintPR({ ...reviewPR, outputMode: 'print' }); setTimeout(() => window.print(), 400); }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50 transition"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    Print
+                  </button>
+                </div>
               </div>
+
+              {/* 3. TINDAKAN (expanded inline) */}
+              <div className="rounded-xl overflow-hidden border border-slate-100">
+                <div className="flex items-center gap-3 px-3 py-2.5 bg-slate-50">
+                  <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0">
+                    <MoreVertical className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-xs font-bold text-slate-700">Tindakan</div>
+                    <div className="text-[10px] text-slate-400">Duplikat atau hapus pengajuan</div>
+                  </div>
+                </div>
+                <div className="flex border-t border-slate-100 divide-x divide-slate-100">
+                  <button
+                    onClick={() => handleDuplicate(reviewPR)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold text-amber-700 hover:bg-amber-50 transition"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Duplikat
+                  </button>
+                  <button
+                    onClick={() => { setReviewPR(null); handleDelete(reviewPR); }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold text-rose-600 hover:bg-rose-50 transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Hapus
+                  </button>
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div className="pt-1" />
+
+              {/* 4. LIHAT JURNAL */}
+              <button
+                onClick={() => { setReviewPR(null); setJournalPR(reviewPR); }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-purple-50 hover:text-purple-700 rounded-xl transition text-left group"
+              >
+                <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center flex-shrink-0 group-hover:bg-purple-200 transition">
+                  <BookOpen className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold leading-tight">Lihat Jurnal Akuntansi</div>
+                  <div className="text-[10px] text-slate-400 font-normal">COA, Debit &amp; Kredit pengajuan ini</div>
+                </div>
+                <ChevronDown className="w-3 h-3 text-slate-300 group-hover:text-purple-400 flex-shrink-0 -rotate-90" />
+              </button>
+
             </div>
 
-            {/* Divider */}
-            <div className="border-t border-slate-100 my-1" />
-
-            {/* 4. LIHAT JURNAL */}
-            <button
-              onClick={() => { setReviewPR(null); setJournalPR(reviewPR); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-purple-50 hover:text-purple-700 rounded-xl transition text-left"
-            >
-              <div className="w-7 h-7 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center flex-shrink-0">
-                <BookOpen className="w-3.5 h-3.5" />
+            {/* Footer nominal summary */}
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-100 rounded-b-2xl flex items-center justify-between gap-3">
+              <div className="text-[10px] text-slate-500">
+                <span className="font-semibold text-slate-700">Net Dibayar: </span>
+                <span className="font-mono font-bold text-emerald-700">{formatRupiah(reviewPR.totalPayable)}</span>
               </div>
-              <div>
-                <div className="font-bold">Lihat Jurnal Akuntansi</div>
-                <div className="text-[10px] text-slate-400 font-normal">COA, Debit & Kredit pengajuan ini</div>
-              </div>
-            </button>
-
+              <div className="text-[10px] text-slate-400 font-mono">{formatDateIndo(reviewPR.requestDate)}</div>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ═══════════════════════════════════════════════════════════════════════
           MODAL JURNAL AKUNTANSI
