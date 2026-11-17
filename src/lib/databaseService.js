@@ -1,5 +1,6 @@
 import { getSupabase } from './supabase';
 import { INITIAL_USERS, INITIAL_ROLES } from './initialUsers';
+import { INITIAL_ASSET_CATEGORIES, calculateCommercialDepreciationSchedule, calculateTaxDepreciationSchedule } from './assetCalculator';
 
 const STORAGE_KEYS = {
   COA: 'app_coa_data',
@@ -10,7 +11,14 @@ const STORAGE_KEYS = {
   ROLES: 'app_roles_data',
   VENDOR_DEPOSITS: 'app_vendor_deposits_data',
   PAYMENT_TRANSACTIONS: 'app_payment_transactions_data',
-  PURCHASES_PAYMENTS: 'app_purchases_payments_data'
+  PURCHASES_PAYMENTS: 'app_purchases_payments_data',
+  FIXED_ASSETS: 'app_fixed_assets_data',
+  ASSET_CATEGORIES: 'app_asset_categories_data',
+  JOURNAL_ENTRIES: 'app_journal_entries_data',
+  ASSET_MOVEMENTS: 'app_asset_movements_data',
+  ASSET_DISPOSALS: 'app_asset_disposals_data',
+  ASSET_POSTINGS: 'app_asset_postings_data',
+  ASSET_AUDIT_LOGS: 'app_asset_audit_logs_data'
 };
 
 // Local storage helpers (only for offline / demo mode)
@@ -1059,3 +1067,908 @@ export async function cancelPurchasePayment({
     cancelTx
   };
 }
+
+// ==============================================================================
+// 8. MODUL JURNAL UMUM (JOURNAL ENTRIES & GENERAL LEDGER)
+// ==============================================================================
+
+export async function fetchJournalEntries() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('journal_entries').select('*').order('entry_date', { ascending: false });
+      if (!error && data) {
+        return data.map(item => ({
+          id: item.id,
+          entryNumber: item.entry_number,
+          entryDate: item.entry_date,
+          sourceModule: item.source_module,
+          referenceId: item.reference_id,
+          referenceNo: item.reference_no,
+          description: item.description,
+          totalDebit: Number(item.total_debit || 0),
+          totalCredit: Number(item.total_credit || 0),
+          status: item.status,
+          postedBy: item.posted_by,
+          postedAt: item.posted_at,
+          lines: item.lines || []
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading journal entries from Supabase:', err);
+    }
+  }
+  return getLocal(STORAGE_KEYS.JOURNAL_ENTRIES, []);
+}
+
+export async function saveJournalEntry(entry) {
+  const supabase = getSupabase();
+  const id = entry.id || `je-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const dateStr = (entry.entryDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
+  const entryNumber = entry.entryNumber || `JV-${dateStr}-${String(Math.floor(100 + Math.random() * 900))}`;
+  
+  const newEntry = {
+    ...entry,
+    id,
+    entryNumber,
+    entryDate: entry.entryDate || new Date().toISOString().slice(0, 10),
+    totalDebit: Number(entry.totalDebit || 0),
+    totalCredit: Number(entry.totalCredit || 0),
+    status: entry.status || 'Posted',
+    postedAt: entry.postedAt || new Date().toISOString()
+  };
+
+  if (supabase) {
+    try {
+      const dbPayload = {
+        id: newEntry.id,
+        entry_number: newEntry.entryNumber,
+        entry_date: newEntry.entryDate,
+        source_module: newEntry.sourceModule || 'Manual',
+        reference_id: newEntry.referenceId || null,
+        reference_no: newEntry.referenceNo || null,
+        description: newEntry.description,
+        total_debit: newEntry.totalDebit,
+        total_credit: newEntry.totalCredit,
+        status: newEntry.status,
+        posted_by: newEntry.postedBy || 'Sistem',
+        posted_at: newEntry.postedAt,
+        lines: newEntry.lines || []
+      };
+      await supabase.from('journal_entries').upsert(dbPayload);
+    } catch (err) {
+      console.warn('Supabase upsert journal error:', err);
+    }
+  }
+
+  const localList = getLocal(STORAGE_KEYS.JOURNAL_ENTRIES, []);
+  const index = localList.findIndex(j => j.id === id);
+  let updated;
+  if (index >= 0) {
+    updated = [...localList];
+    updated[index] = newEntry;
+  } else {
+    updated = [newEntry, ...localList];
+  }
+  setLocal(STORAGE_KEYS.JOURNAL_ENTRIES, updated);
+  return newEntry;
+}
+
+// ==============================================================================
+// 9. MODUL MASTER KATEGORI ASET TETAP
+// ==============================================================================
+
+export async function fetchAssetCategories() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('asset_categories').select('*').order('code', { ascending: true });
+      if (!error && data && data.length > 0) {
+        return data.map(item => ({
+          id: item.id,
+          code: item.code,
+          name: item.name,
+          assetAccountCode: item.asset_account_code,
+          accumDeprecAccountCode: item.accum_deprec_account_code,
+          deprecExpenseAccountCode: item.deprec_expense_account_code,
+          defaultDeprecMethod: item.default_deprec_method,
+          defaultUsefulLifeYears: item.default_useful_life_years,
+          defaultSalvageValuePct: Number(item.default_salvage_value_pct || 0),
+          taxGroup: item.tax_group,
+          isActive: item.is_active
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading asset categories from Supabase:', err);
+    }
+  }
+  return getLocal(STORAGE_KEYS.ASSET_CATEGORIES, INITIAL_ASSET_CATEGORIES);
+}
+
+export async function saveAssetCategory(category) {
+  const supabase = getSupabase();
+  const id = category.id || `cat-${Date.now()}`;
+  const newCat = { ...category, id };
+
+  if (supabase) {
+    try {
+      const dbPayload = {
+        id: newCat.id,
+        code: newCat.code,
+        name: newCat.name,
+        asset_account_code: newCat.assetAccountCode,
+        accum_deprec_account_code: newCat.accumDeprecAccountCode,
+        deprec_expense_account_code: newCat.deprecExpenseAccountCode,
+        default_deprec_method: newCat.defaultDeprecMethod || 'Garis Lurus',
+        default_useful_life_years: Number(newCat.defaultUsefulLifeYears || 4),
+        default_salvage_value_pct: Number(newCat.defaultSalvageValuePct || 0),
+        tax_group: newCat.taxGroup || 'Kelompok 1',
+        is_active: newCat.isActive !== false
+      };
+      await supabase.from('asset_categories').upsert(dbPayload);
+    } catch (err) {
+      console.warn('Supabase upsert asset_categories error:', err);
+    }
+  }
+
+  const localList = await fetchAssetCategories();
+  const index = localList.findIndex(c => c.id === id);
+  let updated;
+  if (index >= 0) {
+    updated = [...localList];
+    updated[index] = newCat;
+  } else {
+    updated = [...localList, newCat];
+  }
+  setLocal(STORAGE_KEYS.ASSET_CATEGORIES, updated);
+  return newCat;
+}
+
+// ==============================================================================
+// 10. MODUL ASET TETAP (FIXED ASSETS CRUD & CYCLES)
+// ==============================================================================
+
+export async function fetchFixedAssets() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('fixed_assets').select('*').order('created_at', { ascending: false });
+      if (!error && data) {
+        return data.map(item => ({
+          id: item.id,
+          assetNumber: item.asset_number,
+          name: item.name,
+          categoryId: item.category_id,
+          categoryName: item.category_name,
+          description: item.description,
+          acquisitionDate: item.acquisition_date,
+          inServiceDate: item.in_service_date,
+          location: item.location,
+          department: item.department,
+          custodian: item.custodian,
+          serialNumber: item.serial_number,
+          condition: item.condition,
+          vendorId: item.vendor_id,
+          vendorName: item.vendor_name,
+          purchaseInvoiceNo: item.purchase_invoice_no,
+          purchaseRequestId: item.purchase_request_id,
+          purchasePrice: Number(item.purchase_price || 0),
+          deliveryCost: Number(item.delivery_cost || 0),
+          installationCost: Number(item.installation_cost || 0),
+          otherCapitalizedCost: Number(item.other_capitalized_cost || 0),
+          discountAmount: Number(item.discount_amount || 0),
+          nonCreditableVat: Number(item.non_creditable_vat || 0),
+          acquisitionCost: Number(item.acquisition_cost || 0),
+          depreciationMethod: item.depreciation_method,
+          usefulLifeYears: Number(item.useful_life_years || 4),
+          usefulLifeMonths: Number(item.useful_life_months || 48),
+          salvageValue: Number(item.salvage_value || 0),
+          depreciationRatePct: Number(item.depreciation_rate_pct || 25),
+          monthlyDepreciation: Number(item.monthly_depreciation || 0),
+          accumulatedDepreciation: Number(item.accumulated_depreciation || 0),
+          bookValue: Number(item.book_value || 0),
+          totalEstimatedUnits: Number(item.total_estimated_units || 0),
+          unitsProducedToDate: Number(item.units_produced_to_date || 0),
+          taxGroup: item.tax_group,
+          taxDepreciationMethod: item.tax_depreciation_method,
+          taxUsefulLifeYears: Number(item.tax_useful_life_years || 4),
+          taxRatePct: Number(item.tax_rate_pct || 25),
+          taxMonthlyDepreciation: Number(item.tax_monthly_depreciation || 0),
+          taxAccumulatedDepreciation: Number(item.tax_accumulated_depreciation || 0),
+          taxBookValue: Number(item.tax_book_value || 0),
+          status: item.status,
+          lastDepreciationDate: item.last_depreciation_date
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading fixed assets from Supabase:', err);
+    }
+  }
+  return getLocal(STORAGE_KEYS.FIXED_ASSETS, []);
+}
+
+export async function saveFixedAsset(asset) {
+  const supabase = getSupabase();
+  const id = asset.id || `ast-${Date.now()}`;
+  
+  // Hitung ulang schedule komersial & fiskal
+  const comm = calculateCommercialDepreciationSchedule({
+    acquisitionCost: asset.acquisitionCost,
+    salvageValue: asset.salvageValue || 0,
+    usefulLifeYears: asset.usefulLifeYears || 4,
+    method: asset.depreciationMethod || 'Garis Lurus',
+    inServiceDate: asset.inServiceDate || asset.acquisitionDate,
+    totalEstimatedUnits: asset.totalEstimatedUnits || 0
+  });
+
+  const tax = calculateTaxDepreciationSchedule({
+    acquisitionCost: asset.acquisitionCost,
+    taxGroup: asset.taxGroup || 'Kelompok 1',
+    taxMethod: asset.taxDepreciationMethod || 'Garis Lurus',
+    inServiceDate: asset.inServiceDate || asset.acquisitionDate
+  });
+
+  const monthlyDep = comm.monthlyDepreciationEstimate;
+  const accumDep = asset.accumulatedDepreciation !== undefined ? Number(asset.accumulatedDepreciation) : 0;
+  const bookVal = Math.max(Number(asset.salvageValue || 0), Number(asset.acquisitionCost || 0) - accumDep);
+
+  const taxMonthlyDep = tax.monthlyDepreciationEstimate;
+  const taxAccumDep = asset.taxAccumulatedDepreciation !== undefined ? Number(asset.taxAccumulatedDepreciation) : 0;
+  const taxBookVal = Math.max(0, Number(asset.acquisitionCost || 0) - taxAccumDep);
+
+  const newAsset = {
+    ...asset,
+    id,
+    monthlyDepreciation: monthlyDep,
+    accumulatedDepreciation: accumDep,
+    bookValue: bookVal,
+    taxMonthlyDepreciation: taxMonthlyDep,
+    taxAccumulatedDepreciation: taxAccumDep,
+    taxBookValue: taxBookVal,
+    status: asset.status || 'Active'
+  };
+
+  if (supabase) {
+    try {
+      const dbPayload = {
+        id: newAsset.id,
+        asset_number: newAsset.assetNumber,
+        name: newAsset.name,
+        category_id: newAsset.categoryId || null,
+        category_name: newAsset.categoryName,
+        description: newAsset.description || '',
+        acquisition_date: newAsset.acquisitionDate,
+        in_service_date: newAsset.inServiceDate || newAsset.acquisitionDate,
+        location: newAsset.location || 'Kantor Pusat',
+        department: newAsset.department || 'Operasional',
+        custodian: newAsset.custodian || '',
+        serial_number: newAsset.serialNumber || '',
+        condition: newAsset.condition || 'Baik',
+        vendor_id: newAsset.vendorId || null,
+        vendor_name: newAsset.vendorName || '',
+        purchase_invoice_no: newAsset.purchaseInvoiceNo || '',
+        purchase_request_id: newAsset.purchaseRequestId || null,
+        purchase_price: Number(newAsset.purchasePrice || 0),
+        delivery_cost: Number(newAsset.deliveryCost || 0),
+        installation_cost: Number(newAsset.installationCost || 0),
+        other_capitalized_cost: Number(newAsset.otherCapitalizedCost || 0),
+        discount_amount: Number(newAsset.discountAmount || 0),
+        non_creditable_vat: Number(newAsset.nonCreditableVat || 0),
+        acquisition_cost: Number(newAsset.acquisitionCost || 0),
+        depreciation_method: newAsset.depreciationMethod || 'Garis Lurus',
+        useful_life_years: Number(newAsset.usefulLifeYears || 4),
+        useful_life_months: Math.round(Number(newAsset.usefulLifeYears || 4) * 12),
+        salvage_value: Number(newAsset.salvageValue || 0),
+        depreciation_rate_pct: Number(newAsset.depreciationRatePct || 25),
+        monthly_depreciation: monthlyDep,
+        accumulated_depreciation: accumDep,
+        book_value: bookVal,
+        total_estimated_units: Number(newAsset.totalEstimatedUnits || 0),
+        units_produced_to_date: Number(newAsset.unitsProducedToDate || 0),
+        tax_group: newAsset.taxGroup || 'Kelompok 1',
+        tax_depreciation_method: newAsset.taxDepreciationMethod || 'Garis Lurus',
+        tax_useful_life_years: Number(tax.usefulLifeYears || 4),
+        tax_rate_pct: Number(tax.annualRate || 25),
+        tax_monthly_depreciation: taxMonthlyDep,
+        tax_accumulated_depreciation: taxAccumDep,
+        tax_book_value: taxBookVal,
+        status: newAsset.status,
+        last_depreciation_date: newAsset.lastDepreciationDate || null
+      };
+      await supabase.from('fixed_assets').upsert(dbPayload);
+    } catch (err) {
+      console.warn('Supabase upsert fixed_assets error:', err);
+    }
+  }
+
+  const localList = await fetchFixedAssets();
+  const index = localList.findIndex(a => a.id === id);
+  let updated;
+  if (index >= 0) {
+    updated = [...localList];
+    updated[index] = newAsset;
+  } else {
+    updated = [newAsset, ...localList];
+  }
+  setLocal(STORAGE_KEYS.FIXED_ASSETS, updated);
+  return newAsset;
+}
+
+export async function deleteFixedAsset(id) {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('fixed_assets').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase delete fixed asset error:', err);
+    }
+  }
+  const localList = await fetchFixedAssets();
+  const filtered = localList.filter(a => a.id !== id);
+  setLocal(STORAGE_KEYS.FIXED_ASSETS, filtered);
+  return true;
+}
+
+// ==============================================================================
+// 11. OTOMATISASI GENERATE & POSTING JURNAL PENYUSUTAN BULANAN
+// ==============================================================================
+
+export async function fetchAssetPostings() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('asset_depreciation_postings').select('*').order('posting_date', { ascending: false });
+      if (!error && data) {
+        return data.map(item => ({
+          id: item.id,
+          postingNumber: item.posting_number,
+          postingDate: item.posting_date,
+          periodYear: item.period_year,
+          periodMonth: item.period_month,
+          totalAssetsProcessed: Number(item.total_assets_processed || 0),
+          totalDepreciationAmount: Number(item.total_depreciation_amount || 0),
+          journalEntryId: item.journal_entry_id,
+          status: item.status,
+          postedBy: item.posted_by,
+          postedAt: item.posted_at,
+          notes: item.notes
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading asset postings from Supabase:', err);
+    }
+  }
+  return getLocal(STORAGE_KEYS.ASSET_POSTINGS, []);
+}
+
+/**
+ * Preview Penyusutan Bulan Berjalan (Komersial) untuk Semua Aset Aktif
+ */
+export async function previewMonthlyDepreciation({ periodYear, periodMonth }) {
+  const assets = await fetchFixedAssets();
+  const categories = await fetchAssetCategories();
+  const postings = await fetchAssetPostings();
+
+  // Cek apakah periode ini sudah pernah diposting
+  const alreadyPosted = postings.some(p => p.periodYear === periodYear && p.periodMonth === periodMonth && p.status === 'Posted');
+
+  const eligibleAssets = assets.filter(a => a.status === 'Active');
+  const details = [];
+  let totalDep = 0;
+
+  eligibleAssets.forEach(asset => {
+    const cat = categories.find(c => c.id === asset.categoryId || c.name === asset.categoryName) || categories[0];
+    const sched = calculateCommercialDepreciationSchedule({
+      acquisitionCost: asset.acquisitionCost,
+      salvageValue: asset.salvageValue || 0,
+      usefulLifeYears: asset.usefulLifeYears || 4,
+      method: asset.depreciationMethod || 'Garis Lurus',
+      inServiceDate: asset.inServiceDate
+    });
+
+    // Cari jadwal untuk periode ini
+    const targetPeriod = sched.monthlySchedules.find(m => m.periodYear === periodYear && m.periodMonth === periodMonth);
+    const amount = targetPeriod ? targetPeriod.depreciationAmount : (asset.monthlyDepreciation || 0);
+
+    // Pastikan tidak menyusutkan jika sudah habis masa manfaat (nilai buku <= residu)
+    const maxDepreciable = Math.max(0, (Number(asset.bookValue) || 0) - (Number(asset.salvageValue) || 0));
+    const effectiveDep = Math.min(amount, maxDepreciable);
+
+    if (effectiveDep > 0) {
+      totalDep += effectiveDep;
+      details.push({
+        assetId: asset.id,
+        assetNumber: asset.assetNumber,
+        assetName: asset.name,
+        categoryName: asset.categoryName,
+        assetAccountCode: cat?.assetAccountCode || '1201',
+        accumDeprecAccountCode: cat?.accumDeprecAccountCode || '1281',
+        deprecExpenseAccountCode: cat?.deprecExpenseAccountCode || '6201',
+        currentBookValue: asset.bookValue,
+        depreciationAmount: effectiveDep,
+        newBookValue: Math.max(asset.salvageValue || 0, asset.bookValue - effectiveDep)
+      });
+    }
+  });
+
+  return {
+    periodYear,
+    periodMonth,
+    periodLabel: `${periodYear}-${String(periodMonth).padStart(2, '0')}`,
+    alreadyPosted,
+    totalAssets: eligibleAssets.length,
+    assetsToDepreciate: details.length,
+    totalDepreciationAmount: totalDep,
+    details
+  };
+}
+
+/**
+ * Eksekusi Posting Jurnal Penyusutan Bulanan
+ */
+export async function executeMonthlyDepreciationPosting({
+  periodYear,
+  periodMonth,
+  currentUser,
+  notes = ''
+}) {
+  const preview = await previewMonthlyDepreciation({ periodYear, periodMonth });
+  if (preview.alreadyPosted) {
+    throw new Error(`Penyusutan untuk periode ${periodYear}-${String(periodMonth).padStart(2, '0')} sudah pernah diposting. Jurnal tidak boleh dibuat ganda.`);
+  }
+  if (preview.details.length === 0 || preview.totalDepreciationAmount <= 0) {
+    throw new Error(`Tidak ada aset aktif yang memenuhi syarat untuk disusutkan pada periode ini.`);
+  }
+
+  const postingNumber = `DEP-${periodYear}${String(periodMonth).padStart(2, '0')}-${String(Math.floor(100 + Math.random() * 900))}`;
+  const postingDate = new Date().toISOString().slice(0, 10);
+
+  // Buat Jurnal Lines (Debit Beban Penyusutan, Kredit Akumulasi Penyusutan) dikelompokkan per akun
+  const linesMap = {};
+  preview.details.forEach(item => {
+    // 1. Debit: Beban Penyusutan
+    const expCode = item.deprecExpenseAccountCode;
+    if (!linesMap[`D-${expCode}`]) {
+      linesMap[`D-${expCode}`] = {
+        accountCode: expCode,
+        accountName: `Beban Penyusutan (${item.categoryName})`,
+        debit: 0,
+        credit: 0,
+        memo: `Penyusutan ${periodYear}-${periodMonth} - ${item.categoryName}`
+      };
+    }
+    linesMap[`D-${expCode}`].debit += item.depreciationAmount;
+
+    // 2. Kredit: Akumulasi Penyusutan
+    const accCode = item.accumDeprecAccountCode;
+    if (!linesMap[`C-${accCode}`]) {
+      linesMap[`C-${accCode}`] = {
+        accountCode: accCode,
+        accountName: `Akumulasi Penyusutan (${item.categoryName})`,
+        debit: 0,
+        credit: 0,
+        memo: `Akum. Penyusutan ${periodYear}-${periodMonth} - ${item.categoryName}`
+      };
+    }
+    linesMap[`C-${accCode}`].credit += item.depreciationAmount;
+  });
+
+  const journalLines = Object.values(linesMap);
+
+  // Simpan Jurnal Umum
+  const journalEntry = await saveJournalEntry({
+    entryDate: postingDate,
+    sourceModule: 'Aset Tetap',
+    referenceNo: postingNumber,
+    description: `Penyusutan Aset Tetap Periode ${periodYear}-${String(periodMonth).padStart(2, '0')} (${preview.details.length} Aset)`,
+    totalDebit: preview.totalDepreciationAmount,
+    totalCredit: preview.totalDepreciationAmount,
+    status: 'Posted',
+    postedBy: currentUser?.fullName || 'Finance Staff',
+    lines: journalLines
+  });
+
+  // Update nilai akumulasi & buku di data Aset
+  const allAssets = await fetchFixedAssets();
+  for (const item of preview.details) {
+    const target = allAssets.find(a => a.id === item.assetId);
+    if (target) {
+      const newAccum = (Number(target.accumulatedDepreciation) || 0) + item.depreciationAmount;
+      const newBook = Math.max(target.salvageValue || 0, (Number(target.acquisitionCost) || 0) - newAccum);
+      const isFinished = newBook <= (target.salvageValue || 0);
+
+      await saveFixedAsset({
+        ...target,
+        accumulatedDepreciation: newAccum,
+        bookValue: newBook,
+        status: isFinished ? 'Fully Depreciated' : target.status,
+        lastDepreciationDate: postingDate
+      });
+    }
+  }
+
+  // Simpan Record Posting
+  const postingRecord = {
+    id: `post-${Date.now()}`,
+    postingNumber,
+    postingDate,
+    periodYear,
+    periodMonth,
+    totalAssetsProcessed: preview.details.length,
+    totalDepreciationAmount: preview.totalDepreciationAmount,
+    journalEntryId: journalEntry.id,
+    status: 'Posted',
+    postedBy: currentUser?.fullName || 'Finance Staff',
+    postedAt: new Date().toISOString(),
+    notes: notes || `Posting otomatis penyusutan bulanan untuk ${preview.details.length} aset.`
+  };
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('asset_depreciation_postings').upsert({
+        id: postingRecord.id,
+        posting_number: postingRecord.postingNumber,
+        posting_date: postingRecord.postingDate,
+        period_year: postingRecord.periodYear,
+        period_month: postingRecord.periodMonth,
+        total_assets_processed: postingRecord.totalAssetsProcessed,
+        total_depreciation_amount: postingRecord.totalDepreciationAmount,
+        journal_entry_id: postingRecord.journalEntryId,
+        status: postingRecord.status,
+        posted_by: postingRecord.postedBy,
+        posted_at: postingRecord.postedAt,
+        notes: postingRecord.notes
+      });
+    } catch (e) {
+      console.warn('Supabase upsert posting error:', e);
+    }
+  }
+
+  const localPostings = getLocal(STORAGE_KEYS.ASSET_POSTINGS, []);
+  setLocal(STORAGE_KEYS.ASSET_POSTINGS, [postingRecord, ...localPostings]);
+
+  return {
+    success: true,
+    postingRecord,
+    journalEntry,
+    processedCount: preview.details.length,
+    totalAmount: preview.totalDepreciationAmount
+  };
+}
+
+// ==============================================================================
+// 12. MUTASI & PERUBAHAN ASET
+// ==============================================================================
+
+export async function fetchAssetMovements() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('asset_movements').select('*').order('movement_date', { ascending: false });
+      if (!error && data) {
+        return data.map(m => ({
+          id: m.id,
+          movementNumber: m.movement_number,
+          assetId: m.asset_id,
+          movementDate: m.movement_date,
+          movementType: m.movement_type,
+          previousLocation: m.previous_location,
+          previousDepartment: m.previous_department,
+          previousCustodian: m.previous_custodian,
+          previousCondition: m.previous_condition,
+          newLocation: m.new_location,
+          newDepartment: m.new_department,
+          newCustodian: m.new_custodian,
+          newCondition: m.new_condition,
+          reason: m.reason,
+          performedBy: m.performed_by
+        }));
+      }
+    } catch (e) {
+      console.warn('Supabase fetch asset movements error:', e);
+    }
+  }
+  return getLocal(STORAGE_KEYS.ASSET_MOVEMENTS, []);
+}
+
+export async function recordAssetMovement({
+  asset,
+  movementType,
+  newLocation,
+  newDepartment,
+  newCustodian,
+  newCondition,
+  reason,
+  currentUser
+}) {
+  const movNumber = `MOV-${Date.now().toString().slice(-6)}`;
+  const movDate = new Date().toISOString().slice(0, 10);
+
+  const movRecord = {
+    id: `mov-${Date.now()}`,
+    movementNumber: movNumber,
+    assetId: asset.id,
+    movementDate: movDate,
+    movementType,
+    previousLocation: asset.location,
+    previousDepartment: asset.department,
+    previousCustodian: asset.custodian,
+    previousCondition: asset.condition,
+    newLocation: newLocation || asset.location,
+    newDepartment: newDepartment || asset.department,
+    newCustodian: newCustodian || asset.custodian,
+    newCondition: newCondition || asset.condition,
+    reason: reason || 'Mutasi internal aset',
+    performedBy: currentUser?.fullName || 'Admin'
+  };
+
+  const updatedAsset = {
+    ...asset,
+    location: movRecord.newLocation,
+    department: movRecord.newDepartment,
+    custodian: movRecord.newCustodian,
+    condition: movRecord.newCondition
+  };
+
+  await saveFixedAsset(updatedAsset);
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('asset_movements').upsert({
+        id: movRecord.id,
+        movement_number: movRecord.movementNumber,
+        asset_id: movRecord.assetId,
+        movement_date: movRecord.movementDate,
+        movement_type: movRecord.movementType,
+        previous_location: movRecord.previousLocation,
+        previous_department: movRecord.previousDepartment,
+        previous_custodian: movRecord.previousCustodian,
+        previous_condition: movRecord.previousCondition,
+        new_location: movRecord.newLocation,
+        new_department: movRecord.newDepartment,
+        new_custodian: movRecord.newCustodian,
+        new_condition: movRecord.newCondition,
+        reason: movRecord.reason,
+        performed_by: movRecord.performedBy
+      });
+    } catch (e) {
+      console.warn('Supabase record movement error:', e);
+    }
+  }
+
+  const list = getLocal(STORAGE_KEYS.ASSET_MOVEMENTS, []);
+  setLocal(STORAGE_KEYS.ASSET_MOVEMENTS, [movRecord, ...list]);
+
+  return { success: true, movRecord, updatedAsset };
+}
+
+// ==============================================================================
+// 13. PELEPASAN & PENJUALAN ASET (DISPOSAL)
+// ==============================================================================
+
+export async function fetchAssetDisposals() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('asset_disposals').select('*').order('disposal_date', { ascending: false });
+      if (!error && data) {
+        return data.map(d => ({
+          id: d.id,
+          disposalNumber: d.disposal_number,
+          assetId: d.asset_id,
+          assetNumber: d.asset_number,
+          assetName: d.asset_name,
+          disposalDate: d.disposal_date,
+          disposalType: d.disposal_type,
+          acquisitionCost: Number(d.acquisition_cost || 0),
+          accumulatedDepreciation: Number(d.accumulated_depreciation || 0),
+          bookValueAtDisposal: Number(d.book_value_at_disposal || 0),
+          sellingPrice: Number(d.selling_price || 0),
+          disposalExpenses: Number(d.disposal_expenses || 0),
+          netProceeds: Number(d.net_proceeds || 0),
+          gainOrLoss: Number(d.gain_or_loss || 0),
+          buyerInfo: d.buyer_info,
+          paymentAccountCode: d.payment_account_code,
+          journalEntryId: d.journal_entry_id,
+          notes: d.notes,
+          disposedBy: d.disposed_by
+        }));
+      }
+    } catch (e) {
+      console.warn('Supabase fetch asset disposals error:', e);
+    }
+  }
+  return getLocal(STORAGE_KEYS.ASSET_DISPOSALS, []);
+}
+
+export async function executeAssetDisposal({
+  asset,
+  disposalDate,
+  disposalType = 'Sold', // 'Sold', 'Scrapped', 'Damaged', 'Lost'
+  sellingPrice = 0,
+  disposalExpenses = 0,
+  paymentAccountCode = '1102', // Default Bank BCA
+  buyerInfo = '',
+  notes = '',
+  currentUser
+}) {
+  if (!asset || asset.status === 'Disposed') {
+    throw new Error('Aset tidak valid atau sudah berstatus Dilepas.');
+  }
+
+  const dispNumber = `DSP-${Date.now().toString().slice(-6)}`;
+  const dateStr = disposalDate || new Date().toISOString().slice(0, 10);
+  const cost = Number(asset.acquisitionCost) || 0;
+  const accum = Number(asset.accumulatedDepreciation) || 0;
+  const bookValue = Math.max(0, cost - accum);
+
+  const price = Number(sellingPrice) || 0;
+  const exp = Number(disposalExpenses) || 0;
+  const netProceeds = price - exp;
+  const gainOrLoss = netProceeds - bookValue; // > 0 Laba, < 0 Rugi
+
+  const categories = await fetchAssetCategories();
+  const cat = categories.find(c => c.id === asset.categoryId || c.name === asset.categoryName) || categories[0];
+  const assetAcc = cat?.assetAccountCode || '1201';
+  const accumAcc = cat?.accumDeprecAccountCode || '1281';
+
+  // Buat Jurnal Pelepasan Aset
+  const journalLines = [];
+
+  // 1. Debit Kas/Bank jika ada penerimaan bersih dari penjualan
+  if (netProceeds > 0) {
+    journalLines.push({
+      accountCode: paymentAccountCode,
+      accountName: 'Kas / Bank Penerimaan Penjualan Aset',
+      debit: netProceeds,
+      credit: 0,
+      memo: `Penerimaan hasil penjualan aset ${asset.assetNumber}`
+    });
+  }
+
+  // 2. Debit Akumulasi Penyusutan (Hapus akumulasi dari neraca)
+  if (accum > 0) {
+    journalLines.push({
+      accountCode: accumAcc,
+      accountName: `Akumulasi Penyusutan - ${asset.categoryName}`,
+      debit: accum,
+      credit: 0,
+      memo: `Penghapusan akumulasi penyusutan aset ${asset.assetNumber}`
+    });
+  }
+
+  // 3. Catat Rugi (Debit) atau Laba (Kredit) Pelepasan Aset
+  if (gainOrLoss < 0) {
+    // Rugi Pelepasan (Debit Akun 7201)
+    journalLines.push({
+      accountCode: '7201',
+      accountName: 'Kerugian Pelepasan / Penjualan Aset Tetap',
+      debit: Math.abs(gainOrLoss),
+      credit: 0,
+      memo: `Rugi pelepasan aset ${asset.assetNumber}`
+    });
+  } else if (gainOrLoss > 0) {
+    // Laba Pelepasan (Kredit Akun 7101)
+    journalLines.push({
+      accountCode: '7101',
+      accountName: 'Keuntungan (Laba) Pelepasan / Penjualan Aset Tetap',
+      debit: 0,
+      credit: gainOrLoss,
+      memo: `Laba pelepasan aset ${asset.assetNumber}`
+    });
+  }
+
+  // 4. Kredit Harga Perolehan Aset Tetap (Hapus aset dari neraca)
+  journalLines.push({
+    accountCode: assetAcc,
+    accountName: `Aset Tetap - ${asset.categoryName}`,
+    debit: 0,
+    credit: cost,
+    memo: `Penghapusan harga perolehan aset ${asset.assetNumber}`
+  });
+
+  const totDebit = journalLines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
+  const totCredit = journalLines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
+
+  // Simpan Jurnal Pelepasan
+  const journalEntry = await saveJournalEntry({
+    entryDate: dateStr,
+    sourceModule: 'Aset Tetap',
+    referenceNo: dispNumber,
+    description: `Pelepasan / Penjualan Aset Tetap ${asset.assetNumber} (${asset.name}) - ${disposalType}`,
+    totalDebit: totDebit,
+    totalCredit: totCredit,
+    status: 'Posted',
+    postedBy: currentUser?.fullName || 'Finance Staff',
+    lines: journalLines
+  });
+
+  // Update Saldo Kas / Bank jika ada penjualan
+  if (netProceeds > 0 && paymentAccountCode) {
+    try {
+      const coaList = await fetchCOA();
+      const targetAcc = coaList.find(a => a.code === paymentAccountCode);
+      if (targetAcc) {
+        await saveCOAAccount({
+          ...targetAcc,
+          balance: (Number(targetAcc.balance) || 0) + netProceeds
+        });
+      }
+    } catch (e) {
+      console.warn('Gagal menambah saldo kas pelepasan aset:', e);
+    }
+  }
+
+  // Update Status Aset menjadi 'Disposed' dan nilai buku 0
+  const updatedAsset = {
+    ...asset,
+    status: 'Disposed',
+    bookValue: 0
+  };
+  await saveFixedAsset(updatedAsset);
+
+  // Simpan Data Disposal
+  const disposalRecord = {
+    id: `dsp-${Date.now()}`,
+    disposalNumber: dispNumber,
+    assetId: asset.id,
+    assetNumber: asset.assetNumber,
+    assetName: asset.name,
+    disposalDate: dateStr,
+    disposalType,
+    acquisitionCost: cost,
+    accumulatedDepreciation: accum,
+    bookValueAtDisposal: bookValue,
+    sellingPrice: price,
+    disposalExpenses: exp,
+    netProceeds,
+    gainOrLoss,
+    buyerInfo: buyerInfo || '',
+    paymentAccountCode: paymentAccountCode || '',
+    journalEntryId: journalEntry.id,
+    notes: notes || '',
+    disposedBy: currentUser?.fullName || 'Admin'
+  };
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('asset_disposals').upsert({
+        id: disposalRecord.id,
+        disposal_number: disposalRecord.disposalNumber,
+        asset_id: disposalRecord.assetId,
+        asset_number: disposalRecord.assetNumber,
+        asset_name: disposalRecord.assetName,
+        disposal_date: disposalRecord.disposalDate,
+        disposal_type: disposalRecord.disposalType,
+        acquisition_cost: disposalRecord.acquisitionCost,
+        accumulated_depreciation: disposalRecord.accumulatedDepreciation,
+        book_value_at_disposal: disposalRecord.bookValueAtDisposal,
+        selling_price: disposalRecord.sellingPrice,
+        disposal_expenses: disposalRecord.disposalExpenses,
+        net_proceeds: disposalRecord.netProceeds,
+        gain_or_loss: disposalRecord.gainOrLoss,
+        buyer_info: disposalRecord.buyerInfo,
+        payment_account_code: disposalRecord.paymentAccountCode,
+        journal_entry_id: disposalRecord.journalEntryId,
+        notes: disposalRecord.notes,
+        disposed_by: disposalRecord.disposedBy
+      });
+    } catch (e) {
+      console.warn('Supabase upsert disposal error:', e);
+    }
+  }
+
+  const localDisp = getLocal(STORAGE_KEYS.ASSET_DISPOSALS, []);
+  setLocal(STORAGE_KEYS.ASSET_DISPOSALS, [disposalRecord, ...localDisp]);
+
+  return {
+    success: true,
+    disposalRecord,
+    journalEntry,
+    updatedAsset
+  };
+}
+

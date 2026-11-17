@@ -10,7 +10,8 @@ import {
   FileSpreadsheet,
   CheckCircle2,
   UserCheck,
-  Shield
+  Shield,
+  Building2
 } from 'lucide-react';
 import { useAuth } from '../lib/authContext';
 
@@ -51,6 +52,14 @@ export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, 
       badge: stats?.taxRecordsCount || 0,
       badgeColor: 'bg-emerald-100 text-emerald-800'
     },
+    {
+      id: 'assets',
+      label: '5. Aset Tetap (Fixed Assets)',
+      sub: 'Komersial & Fiskal UU PPh',
+      icon: Building2,
+      badge: stats?.assetCount ? `${stats.assetCount} Aset` : null,
+      badgeColor: 'bg-emerald-100 text-emerald-800'
+    },
     { 
       id: 'tax-calculator', 
       label: 'Kalkulator Pajak DJP', 
@@ -59,7 +68,7 @@ export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, 
     },
     {
       id: 'users',
-      label: '5. Master User & Role',
+      label: '6. Master User & Role',
       sub: 'Manajemen RBAC',
       icon: UserCheck,
       badge: isAdmin ? 'Admin' : 'Terkunci',

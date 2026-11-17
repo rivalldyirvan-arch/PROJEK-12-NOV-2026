@@ -10,6 +10,7 @@ import PurchaseModule from './pages/PurchaseModule';
 import TaxModule from './pages/TaxModule';
 import TaxCalculatorTab from './pages/TaxCalculatorTab';
 import UserModule from './pages/UserModule';
+import AssetModule from './pages/AssetModule';
 import LoginPage from './pages/LoginPage';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { 
@@ -17,6 +18,12 @@ import {
   fetchVendors, 
   fetchPurchaseRequests, 
   fetchTaxRecords, 
+  fetchFixedAssets,
+  fetchAssetCategories,
+  fetchJournalEntries,
+  fetchAssetPostings,
+  fetchAssetMovements,
+  fetchAssetDisposals,
   testSupabaseConnection 
 } from './lib/databaseService';
 
@@ -33,6 +40,14 @@ function MainAppContent() {
   const [vendorList, setVendorList] = useState([]);
   const [purchaseRequests, setPurchaseRequests] = useState([]);
   const [taxRecords, setTaxRecords] = useState([]);
+  
+  // Fixed Asset Lists
+  const [assetList, setAssetList] = useState([]);
+  const [assetCategoryList, setAssetCategoryList] = useState([]);
+  const [journalEntriesList, setJournalEntriesList] = useState([]);
+  const [assetPostingsList, setAssetPostingsList] = useState([]);
+  const [assetMovementsList, setAssetMovementsList] = useState([]);
+  const [assetDisposalsList, setAssetDisposalsList] = useState([]);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -44,11 +59,17 @@ function MainAppContent() {
       setLoading(true);
     }
     try {
-      const [coa, vendors, purchases, taxes, conn] = await Promise.all([
+      const [coa, vendors, purchases, taxes, assets, categories, journals, postings, movements, disposals, conn] = await Promise.all([
         fetchCOA(),
         fetchVendors(),
         fetchPurchaseRequests(),
         fetchTaxRecords(),
+        fetchFixedAssets(),
+        fetchAssetCategories(),
+        fetchJournalEntries(),
+        fetchAssetPostings(),
+        fetchAssetMovements(),
+        fetchAssetDisposals(),
         testSupabaseConnection()
       ]);
 
@@ -56,6 +77,12 @@ function MainAppContent() {
       setVendorList(vendors || []);
       setPurchaseRequests(purchases || []);
       setTaxRecords(taxes || []);
+      setAssetList(assets || []);
+      setAssetCategoryList(categories || []);
+      setJournalEntriesList(journals || []);
+      setAssetPostingsList(postings || []);
+      setAssetMovementsList(movements || []);
+      setAssetDisposalsList(disposals || []);
       setIsSupabaseActive(conn.connected);
     } catch (err) {
       console.error('Error loading data:', err);
@@ -94,7 +121,8 @@ function MainAppContent() {
     coaCount: coaList.length,
     vendorCount: vendorList.length,
     pendingPrCount: purchaseRequests.filter(p => p.status === 'Menunggu Persetujuan').length,
-    taxRecordsCount: taxRecords.length
+    taxRecordsCount: taxRecords.length,
+    assetCount: assetList.length
   };
 
   return (
@@ -169,6 +197,22 @@ function MainAppContent() {
                 <TaxModule 
                   taxRecords={taxRecords}
                   vendorList={vendorList}
+                  onRefresh={loadData}
+                  showToast={showToast}
+                />
+              )}
+
+              {activeTab === 'assets' && (
+                <AssetModule 
+                  assets={assetList}
+                  categories={assetCategoryList}
+                  journalEntries={journalEntriesList}
+                  postings={assetPostingsList}
+                  movements={assetMovementsList}
+                  disposals={assetDisposalsList}
+                  coaList={coaList}
+                  vendorList={vendorList}
+                  purchaseRequests={purchaseRequests}
                   onRefresh={loadData}
                   showToast={showToast}
                 />
