@@ -1181,7 +1181,16 @@ export default function PurchaseModule({
                           </div>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-center align-top">
+
+                      {/* Kolom 9: Status */}
+                      <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${statusColors[pr.status] || 'bg-slate-100 text-slate-700'}`}>
+                          {pr.status}
+                        </span>
+                      </td>
+
+                      {/* Kolom 10: Aksi & Workflow */}
+                      <td className="py-3.5 px-4 text-center align-middle whitespace-nowrap">
                         <div className="flex flex-col items-center gap-1.5 py-1">
 
                           {/* Row 1: Edit + Cetak + Tindakan + Jurnal */}
