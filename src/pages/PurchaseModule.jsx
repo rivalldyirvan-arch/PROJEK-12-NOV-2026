@@ -29,11 +29,11 @@ import {
   Lock,
   RotateCcw,
   Package,
-  Eye,
   Copy,
   BookOpen,
-  MoreVertical,
-  ExternalLink
+  MoreHorizontal,
+  Eye,
+  Download as DownloadIcon
 } from 'lucide-react';
 import { formatRupiah, formatDateIndo, TAX_TYPES, calculateTax } from '../lib/taxRules';
 import { savePurchaseRequest, deletePurchaseRequest, saveVendor, executePurchasePayment, cancelPurchasePayment, getVendorDeposit } from '../lib/databaseService';
@@ -135,22 +135,10 @@ export default function PurchaseModule({
   const [cancellationReason, setCancellationReason] = useState('');
   const [isSubmittingCancellation, setIsSubmittingCancellation] = useState(false);
 
-  // ── Review Panel State ──────────────────────────────────────────────────────
-  const [reviewPR, setReviewPR] = useState(null);         // PR yang sedang di-review
-  const [reviewAnchor, setReviewAnchor] = useState(null); // { top, left } posisi popup
-  const [journalPR, setJournalPR] = useState(null);       // PR yang akan dilihat jurnalnya
-  const reviewRef = useRef(null);
-
-  // Tutup review popup jika klik di luar
-  useEffect(() => {
-    const handler = (e) => {
-      if (reviewRef.current && !reviewRef.current.contains(e.target)) {
-        setReviewPR(null);
-      }
-    };
-    if (reviewPR) document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [reviewPR]);
+  // Action dropdown & Journal modal state
+  const [openActionMenu, setOpenActionMenu] = useState(null); // pr.id of open menu (Tindakan)
+  const [openPrintMenu, setOpenPrintMenu] = useState(null);   // pr.id of open print menu
+  const [journalModalPR, setJournalModalPR] = useState(null); // PR to show journal for
 
   // New Vendor Registration State
   const [isNewVendorModalOpen, setIsNewVendorModalOpen] = useState(false);
@@ -894,113 +882,121 @@ export default function PurchaseModule({
     }
   };
 
-  // ── Duplikat Pengajuan ──────────────────────────────────────────────────────
+  // Duplicate: copy PR with a new unique request number
   const handleDuplicate = async (pr) => {
-    try {
-      // Buat nomor baru yang belum dipakai
-      const existing = purchaseRequests.map(r => r.requestNumber);
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '').slice(2, 8); // YYMMDD
-      let counter = purchaseRequests.length + 1;
-      let newNumber;
-      do {
-        newNumber = `PR-${dateStr}-${String(counter).padStart(3, '0')}`;
-        counter++;
-      } while (existing.includes(newNumber));
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '').slice(0, 6);
+    // Generate next available number
+    const existingNums = purchaseRequests
+      .map(r => r.requestNumber)
+      .filter(n => n && n.startsWith(`PR-${dateStr}`))
+      .map(n => {
+        const parts = n.split('-');
+        return parseInt(parts[parts.length - 1]) || 0;
+      });
+    const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : purchaseRequests.length + 1;
+    const newNumber = `PR-${dateStr}-${String(nextNum).padStart(3, '0')}`;
 
-      const duplicated = {
-        ...pr,
-        id: `pr-dup-${Date.now()}`,
-        requestNumber: newNumber,
-        requestDate: new Date().toISOString().slice(0, 10),
-        status: 'Draft',
-        paidAmount: 0,
-        remainingPayable: pr.totalPayable,
-        approvalDate: null,
-        approvedBy: null,
-        paymentDate: null,
-        paymentReference: null,
-        journalEntries: [],
-        notes: `[Duplikat dari ${pr.requestNumber}] ${pr.notes || ''}`.trim()
-      };
-
-      await savePurchaseRequest(duplicated);
-      if (onRefresh) await onRefresh();
-      setReviewPR(null);
-      showToast?.(`Duplikat berhasil dibuat dengan nomor ${newNumber}`, 'success');
-    } catch (err) {
-      showToast?.('Gagal menduplikat: ' + (err.message || 'Error'), 'error');
-    }
+    const duplicated = {
+      ...pr,
+      id: `pr-${Date.now()}`,
+      requestNumber: newNumber,
+      requestDate: new Date().toISOString().slice(0, 10),
+      status: 'Draft',
+      paidAmount: 0,
+      outstandingAmount: pr.totalPayable || pr.netPayable || 0,
+      approvedBy: '',
+      paymentHistory: []
+    };
+    await savePurchaseRequest(duplicated);
+    showToast?.(`Pengajuan berhasil diduplikat menjadi ${newNumber}`, 'success');
+    onRefresh();
+    setOpenActionMenu(null);
   };
 
-  // ── Bangun Entri Jurnal dari PR ─────────────────────────────────────────────
+  // Build journal entries for a PR (Debit / Kredit breakdown)
   const buildJournalEntries = (pr) => {
-    if (!pr) return [];
     const entries = [];
-    const dpp = Number(pr.dpp || 0);
-    const ppnAmount = Number(pr.ppnAmount || 0);
-    const pphAmount = Number(pr.pphAmount || 0);
-    const totalPayable = Number(pr.totalPayable || 0);
+    const dpp = Number(pr.dpp) || Number(pr.subtotal) || 0;
+    const ppnAmount = Number(pr.ppnAmount) || 0;
+    const pphAmount = Number(pr.pphAmount) || 0;
+    const totalPayable = Number(pr.totalPayable) || (dpp + ppnAmount - pphAmount);
+    const vendor = vendorList.find(v => v.id === pr.vendorId);
 
-    // Cari nama COA dari daftar
-    const findCoa = (code) => {
-      const found = coaList.find(c => c.code === String(code));
-      return found ? `${found.code} – ${found.name}` : (code ? String(code) : '–');
-    };
-
-    // 1) Beban / Aset (Debit) – per line item
+    // 1. Per line-item: Debit Beban/Aset
     if (pr.items && pr.items.length > 0) {
       pr.items.forEach((item, idx) => {
-        const amount = Number(item.subtotal || 0);
-        if (amount > 0) {
-          const coaCode = item.coaId || pr.coaDebitAccount || '6105';
+        const sub = Number(item.subtotal) || 0;
+        if (sub === 0) return;
+        const coaAccount = coaList.find(c => c.code === item.coaId) || { code: item.coaId || pr.coaDebitAccount || '6105', name: item.description || 'Beban Pengadaan' };
+        entries.push({
+          no: entries.length + 1,
+          type: 'Debit',
+          coaCode: coaAccount.code,
+          coaName: coaAccount.name || item.description || `Item ${idx + 1}`,
+          description: item.description || pr.title,
+          amount: sub
+        });
+        // Per-line PPN
+        const linePpn = Math.round((sub * (Number(item.taxRate) || 0)) / 100);
+        if (linePpn > 0) {
           entries.push({
             no: entries.length + 1,
-            akun: findCoa(coaCode),
-            keterangan: `Beban/Aset – ${item.description || `Item ${idx + 1}`}`,
-            debit: amount,
-            kredit: 0
+            type: 'Debit',
+            coaCode: '1601',
+            coaName: 'PPN Masukan',
+            description: `PPN ${item.taxRate}% atas ${item.description || pr.title}`,
+            amount: linePpn
           });
         }
       });
     } else {
+      // Fallback: single line
+      const debitCoa = coaList.find(c => c.code === pr.coaDebitAccount) || { code: pr.coaDebitAccount || '6105', name: 'Beban Pengadaan' };
       entries.push({
         no: 1,
-        akun: findCoa(pr.coaDebitAccount || '6105'),
-        keterangan: `Beban Pengadaan – ${pr.title}`,
-        debit: dpp,
-        kredit: 0
+        type: 'Debit',
+        coaCode: debitCoa.code,
+        coaName: debitCoa.name,
+        description: pr.title,
+        amount: dpp
       });
+      if (ppnAmount > 0) {
+        entries.push({
+          no: entries.length + 1,
+          type: 'Debit',
+          coaCode: '1601',
+          coaName: 'PPN Masukan',
+          description: `PPN atas ${pr.title}`,
+          amount: ppnAmount
+        });
+      }
     }
 
-    // 2) PPN Masukan (jika ada)
-    if (ppnAmount > 0) {
+    // 2. Kredit: Hutang PPh (jika ada potongan PPh)
+    if (pphAmount > 0 && pr.hasPph) {
+      const pphInfo = PPH_COA_MAP[pr.pphType] || { coaCode: '2113', coaName: 'Hutang Pajak PPh' };
       entries.push({
         no: entries.length + 1,
-        akun: findCoa('1105'),
-        keterangan: `PPN Masukan (${pr.ppnRate || 11}%)`,
-        debit: ppnAmount,
-        kredit: 0
+        type: 'Kredit',
+        coaCode: pphInfo.coaCode,
+        coaName: pphInfo.coaName,
+        description: `Potongan ${pr.pphType} (${pr.pphRate}%) atas ${pr.title}`,
+        amount: pphAmount
       });
     }
 
-    // 3) Hutang PPh (jika ada potongan)
-    if (pphAmount > 0 && pr.pphCoaAccount) {
-      entries.push({
-        no: entries.length + 1,
-        akun: findCoa(pr.pphCoaAccount),
-        keterangan: `${pr.pphType || 'PPh'} Terutang (${pr.pphRate || 0}%)`,
-        debit: 0,
-        kredit: pphAmount
-      });
-    }
-
-    // 4) Hutang Usaha (Kredit) – sisa yang harus dibayar ke vendor
+    // 3. Kredit: Hutang Usaha / Kas & Bank
+    const isLunas = pr.status === 'Lunas';
+    const creditCoa = isLunas
+      ? coaList.find(c => c.code === '1102') || { code: '1102', name: 'Kas & Bank' }
+      : coaList.find(c => c.code === pr.coaCreditAccount) || { code: pr.coaCreditAccount || '2101', name: 'Hutang Usaha' };
     entries.push({
       no: entries.length + 1,
-      akun: findCoa(pr.coaCreditAccount || '2101'),
-      keterangan: `Hutang Usaha – ${pr.vendorName || 'Vendor'}`,
-      debit: 0,
-      kredit: totalPayable
+      type: 'Kredit',
+      coaCode: creditCoa.code,
+      coaName: creditCoa.name,
+      description: isLunas ? `Pembayaran ke ${pr.vendorName || vendor?.name || '-'}` : `Hutang kepada ${pr.vendorName || vendor?.name || '-'}`,
+      amount: totalPayable
     });
 
     return entries;
@@ -1185,89 +1181,136 @@ export default function PurchaseModule({
                           </div>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${statusColors[pr.status] || 'bg-slate-100 text-slate-700'}`}>
-                          {pr.status}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center gap-1.5">
-                          {/* ── Tombol Review (ikon mata) ── */}
-                          <div className="relative">
+                      <td className="py-3.5 px-4 text-center align-top">
+                        <div className="flex flex-col items-center gap-1.5 py-1">
+
+                          {/* Row 1: Edit + Cetak + Tindakan + Jurnal */}
+                          <div className="flex items-center gap-1 flex-wrap justify-center">
+
+                            {/* 1. EDIT */}
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (reviewPR?.id === pr.id) {
-                                  setReviewPR(null);
-                                } else {
-                                  const rect = e.currentTarget.getBoundingClientRect();
-                                  setReviewAnchor({ top: rect.bottom + window.scrollY + 4, left: rect.left + window.scrollX });
-                                  setReviewPR(pr);
-                                }
-                              }}
-                              className={`p-1.5 rounded-lg transition ${reviewPR?.id === pr.id ? 'bg-indigo-100 text-indigo-700' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
-                              title="Review Pengajuan"
+                              onClick={() => handleOpenEdit(pr)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 bg-white border border-slate-300 hover:border-emerald-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition shadow-xs"
+                              title="Edit Pengajuan"
                             >
-                              <Eye className="w-3.5 h-3.5" />
+                              <Edit3 className="w-3 h-3" />
+                              Edit
+                            </button>
+
+                            {/* 2. CETAK dropdown */}
+                            <div className="relative">
+                              <button
+                                onClick={() => { setOpenPrintMenu(openPrintMenu === pr.id ? null : pr.id); setOpenActionMenu(null); }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 bg-white border border-slate-300 hover:border-blue-400 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition shadow-xs"
+                              >
+                                <Printer className="w-3 h-3" />
+                                Cetak
+                                <ChevronDown className="w-3 h-3" />
+                              </button>
+                              {openPrintMenu === pr.id && (
+                                <div className="absolute right-0 top-full mt-1 z-50 bg-white rounded-xl shadow-2xl border border-slate-200 min-w-[160px] overflow-hidden">
+                                  <button
+                                    onClick={() => { setPrintPR(pr); setOpenPrintMenu(null); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition text-left"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    Preview & Cetak
+                                  </button>
+                                  <button
+                                    onClick={() => { setPrintPR(pr); setOpenPrintMenu(null); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition text-left border-t border-slate-100"
+                                  >
+                                    <DownloadIcon className="w-3.5 h-3.5" />
+                                    Ekspor PDF
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 3. TINDAKAN dropdown */}
+                            <div className="relative">
+                              <button
+                                onClick={() => { setOpenActionMenu(openActionMenu === pr.id ? null : pr.id); setOpenPrintMenu(null); }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 bg-white border border-slate-300 hover:border-slate-400 hover:bg-slate-50 rounded-lg transition shadow-xs"
+                              >
+                                <MoreHorizontal className="w-3 h-3" />
+                                Tindakan
+                                <ChevronDown className="w-3 h-3" />
+                              </button>
+                              {openActionMenu === pr.id && (
+                                <div className="absolute right-0 top-full mt-1 z-50 bg-white rounded-xl shadow-2xl border border-slate-200 min-w-[170px] overflow-hidden">
+                                  <button
+                                    onClick={() => handleDuplicate(pr)}
+                                    className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-amber-50 hover:text-amber-700 transition text-left"
+                                  >
+                                    <Copy className="w-3.5 h-3.5" />
+                                    Duplikat Pengajuan
+                                  </button>
+                                  <button
+                                    onClick={() => { handleDelete(pr); setOpenActionMenu(null); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-bold text-rose-600 hover:bg-rose-50 transition text-left border-t border-slate-100"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    Hapus Pengajuan
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 4. LIHAT JURNAL */}
+                            <button
+                              onClick={() => setJournalModalPR(pr)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-lg transition shadow-xs"
+                              title="Lihat Jurnal Akuntansi"
+                            >
+                              <BookOpen className="w-3 h-3" />
+                              Jurnal
                             </button>
                           </div>
 
-                          {/* ── Tombol Workflow sesuai Status ── */}
-                          {pr.status === 'Menunggu Persetujuan' && (
-                            hasPermission('approve_purchase') ? (
-                              <>
-                                <button
-                                  onClick={() => handleUpdateStatus(pr, 'Disetujui')}
-                                  className="px-2 py-1 text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-md transition shadow-xs"
-                                  title="Setujui Pengajuan"
-                                >
-                                  Setujui
-                                </button>
-                                <button
-                                  onClick={() => handleUpdateStatus(pr, 'Ditolak')}
-                                  className="px-2 py-1 text-[10px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-md transition border border-rose-200"
-                                  title="Tolak Pengajuan"
-                                >
-                                  Tolak
-                                </button>
-                              </>
-                            ) : (
-                              <span className="text-[10px] text-slate-400 italic">Menunggu Review</span>
-                            )
+                          {/* Row 2: Workflow actions (status-based) */}
+                          {pr.status === 'Menunggu Persetujuan' && hasPermission('approve_purchase') && (
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => handleUpdateStatus(pr, 'Disetujui')}
+                                className="px-2.5 py-1 text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-md transition"
+                              >✓ Setujui</button>
+                              <button
+                                onClick={() => handleUpdateStatus(pr, 'Ditolak')}
+                                className="px-2.5 py-1 text-[10px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-md border border-rose-200 transition"
+                              >✕ Tolak</button>
+                            </div>
+                          )}
+                          {pr.status === 'Menunggu Persetujuan' && !hasPermission('approve_purchase') && (
+                            <span className="text-[10px] text-slate-400 italic">Menunggu Review</span>
+                          )}
+                          {(pr.status === 'Disetujui' || pr.status === 'Sebagian Dibayar') && hasPermission('pay_purchase') && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const vInfo = vendorList.find(v => v.id === pr.vendorId) || { vendorId: pr.vendorId, vendorName: pr.vendorName };
+                                handleOpenPaymentModal([pr], vInfo);
+                              }}
+                              className="px-2.5 py-1 text-[10px] font-extrabold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-md transition flex items-center gap-1"
+                            >
+                              <CheckCircle className="w-3 h-3" />
+                              <span>Konfirmasi LUNAS</span>
+                            </button>
+                          )}
+                          {(pr.status === 'Disetujui' || pr.status === 'Sebagian Dibayar') && !hasPermission('pay_purchase') && (
+                            <span className="text-[10px] text-emerald-600 font-semibold">Disetujui</span>
+                          )}
+                          {pr.status === 'Lunas' && hasPermission('pay_purchase') && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenCancelPayment(pr)}
+                              className="px-2.5 py-1 text-[10px] font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-md transition flex items-center gap-1 cursor-pointer"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Batalkan Lunas</span>
+                            </button>
                           )}
 
-                          {(pr.status === 'Disetujui' || pr.status === 'Sebagian Dibayar') && (
-                            hasPermission('pay_purchase') ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const vInfo = vendorList.find(v => v.id === pr.vendorId) || { vendorId: pr.vendorId, vendorName: pr.vendorName };
-                                  handleOpenPaymentModal([pr], vInfo);
-                                }}
-                                className="px-2.5 py-1 text-[10px] font-extrabold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-md transition shadow-2xs flex items-center gap-1"
-                                title="Konfirmasi Pelunasan Pembayaran"
-                              >
-                                <CheckCircle className="w-3 h-3" />
-                                <span>LUNAS</span>
-                              </button>
-                            ) : (
-                              <span className="text-[10px] text-emerald-600 font-medium">Disetujui</span>
-                            )
-                          )}
-
-                          {pr.status === 'Lunas' && (
-                            hasPermission('pay_purchase') ? (
-                              <button
-                                type="button"
-                                onClick={() => handleOpenCancelPayment(pr)}
-                                className="px-2.5 py-1 text-[10px] font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-md transition shadow-2xs flex items-center gap-1 cursor-pointer"
-                                title="Batalkan Pelunasan dan kembalikan ke status Disetujui"
-                              >
-                                <RotateCcw className="w-3 h-3" />
-                                <span>Batalkan Pelunasan</span>
-                              </button>
-                            ) : null
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -2665,258 +2708,122 @@ export default function PurchaseModule({
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          REVIEW POPUP — floating panel (fixed positioning)
-      ════════════════════════════════════════════════════════════════════════ */}
-      {reviewPR && (() => {
-        // Sub-panel state di-manage dengan data attribute toggling
+      {/* ================================================================= */}
+      {/* MODAL JURNAL AKUNTANSI                                             */}
+      {/* ================================================================= */}
+      {journalModalPR && (() => {
+        const entries = buildJournalEntries(journalModalPR);
+        const totalDebit = entries.filter(e => e.type === 'Debit').reduce((s, e) => s + e.amount, 0);
+        const totalKredit = entries.filter(e => e.type === 'Kredit').reduce((s, e) => s + e.amount, 0);
+        const isBalanced = Math.abs(totalDebit - totalKredit) < 1;
         return (
-          <div
-            ref={reviewRef}
-            className="fixed z-[200] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-visible"
-            style={{ top: reviewAnchor?.top ?? 100, left: reviewAnchor?.left ?? 100, minWidth: 288 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="bg-slate-900 px-4 py-3 flex items-center justify-between gap-3 rounded-t-2xl">
-              <div className="min-w-0">
-                <div className="font-bold text-white text-xs font-mono">{reviewPR.requestNumber}</div>
-                <div className="text-[10px] text-slate-400 truncate max-w-[210px]">{reviewPR.title}</div>
-              </div>
-              <button onClick={() => setReviewPR(null)} className="text-slate-400 hover:text-white p-0.5 rounded flex-shrink-0">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border border-slate-200 overflow-hidden my-6">
 
-            {/* Status Badge */}
-            <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                reviewPR.status === 'Lunas' ? 'bg-teal-100 text-teal-800 border-teal-200' :
-                reviewPR.status === 'Disetujui' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
-                reviewPR.status === 'Menunggu Persetujuan' ? 'bg-amber-100 text-amber-800 border-amber-200' :
-                reviewPR.status === 'Ditolak' ? 'bg-rose-100 text-rose-800 border-rose-200' :
-                'bg-slate-100 text-slate-700 border-slate-200'
-              }`}>{reviewPR.status}</span>
-              <span className="text-[10px] text-slate-400">{reviewPR.vendorName}</span>
-            </div>
-
-            {/* Body */}
-            <div className="p-2 space-y-0.5">
-
-              {/* 1. EDIT */}
-              <button
-                onClick={() => { setReviewPR(null); handleOpenEdit(reviewPR); }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl transition text-left group"
-              >
-                <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center flex-shrink-0 group-hover:bg-indigo-200 transition">
-                  <Edit3 className="w-4 h-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold leading-tight">Edit Pengajuan</div>
-                  <div className="text-[10px] text-slate-400 font-normal">Ubah data dan simpan perubahan</div>
-                </div>
-                <ExternalLink className="w-3 h-3 text-slate-300 group-hover:text-indigo-400 flex-shrink-0" />
-              </button>
-
-              {/* 2. CETAK (expanded inline) */}
-              <div className="rounded-xl overflow-hidden border border-slate-100">
-                <div className="flex items-center gap-3 px-3 py-2.5 bg-slate-50">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0">
-                    <Printer className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-xs font-bold text-slate-700">Cetak</div>
-                    <div className="text-[10px] text-slate-400">PDF atau print dokumen</div>
-                  </div>
-                </div>
-                <div className="flex border-t border-slate-100 divide-x divide-slate-100">
-                  <button
-                    onClick={() => { setReviewPR(null); setPrintPR({ ...reviewPR, outputMode: 'pdf' }); }}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold text-rose-600 hover:bg-rose-50 transition"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    PDF
-                  </button>
-                  <button
-                    onClick={() => { setReviewPR(null); setPrintPR({ ...reviewPR, outputMode: 'print' }); setTimeout(() => window.print(), 400); }}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold text-slate-600 hover:bg-slate-50 transition"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    Print
-                  </button>
-                </div>
-              </div>
-
-              {/* 3. TINDAKAN (expanded inline) */}
-              <div className="rounded-xl overflow-hidden border border-slate-100">
-                <div className="flex items-center gap-3 px-3 py-2.5 bg-slate-50">
-                  <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0">
-                    <MoreVertical className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-xs font-bold text-slate-700">Tindakan</div>
-                    <div className="text-[10px] text-slate-400">Duplikat atau hapus pengajuan</div>
-                  </div>
-                </div>
-                <div className="flex border-t border-slate-100 divide-x divide-slate-100">
-                  <button
-                    onClick={() => handleDuplicate(reviewPR)}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold text-amber-700 hover:bg-amber-50 transition"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    Duplikat
-                  </button>
-                  <button
-                    onClick={() => { setReviewPR(null); handleDelete(reviewPR); }}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold text-rose-600 hover:bg-rose-50 transition"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Hapus
-                  </button>
-                </div>
-              </div>
-
-              {/* Divider */}
-              <div className="pt-1" />
-
-              {/* 4. LIHAT JURNAL */}
-              <button
-                onClick={() => { setReviewPR(null); setJournalPR(reviewPR); }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-purple-50 hover:text-purple-700 rounded-xl transition text-left group"
-              >
-                <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center flex-shrink-0 group-hover:bg-purple-200 transition">
-                  <BookOpen className="w-4 h-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold leading-tight">Lihat Jurnal Akuntansi</div>
-                  <div className="text-[10px] text-slate-400 font-normal">COA, Debit &amp; Kredit pengajuan ini</div>
-                </div>
-                <ChevronDown className="w-3 h-3 text-slate-300 group-hover:text-purple-400 flex-shrink-0 -rotate-90" />
-              </button>
-
-            </div>
-
-            {/* Footer nominal summary */}
-            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-100 rounded-b-2xl flex items-center justify-between gap-3">
-              <div className="text-[10px] text-slate-500">
-                <span className="font-semibold text-slate-700">Net Dibayar: </span>
-                <span className="font-mono font-bold text-emerald-700">{formatRupiah(reviewPR.totalPayable)}</span>
-              </div>
-              <div className="text-[10px] text-slate-400 font-mono">{formatDateIndo(reviewPR.requestDate)}</div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ═══════════════════════════════════════════════════════════════════════
-          MODAL JURNAL AKUNTANSI
-      ════════════════════════════════════════════════════════════════════════ */}
-      {journalPR && (() => {
-        const entries = buildJournalEntries(journalPR);
-        const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
-        const totalKredit = entries.reduce((s, e) => s + e.kredit, 0);
-        return (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border border-slate-200 overflow-hidden">
               {/* Header */}
-              <div className="bg-gradient-to-r from-purple-900 to-indigo-900 px-5 py-4 text-white flex items-center justify-between">
+              <div className="bg-gradient-to-r from-purple-900 to-purple-700 px-6 py-4 text-white flex items-center justify-between">
                 <div>
-                  <div className="flex items-center gap-2 font-bold text-sm">
+                  <h3 className="text-sm font-bold flex items-center gap-2">
                     <BookOpen className="w-4 h-4 text-purple-300" />
-                    Jurnal Akuntansi
-                  </div>
-                  <div className="text-xs text-purple-200 mt-0.5">
-                    {journalPR.requestNumber} · {journalPR.vendorName} · {formatDateIndo(journalPR.requestDate)}
-                  </div>
+                    Jurnal Akuntansi – {journalModalPR.requestNumber}
+                  </h3>
+                  <p className="text-xs text-purple-200 mt-0.5">{journalModalPR.title} • {journalModalPR.vendorName}</p>
                 </div>
-                <button onClick={() => setJournalPR(null)} className="text-purple-300 hover:text-white p-1 rounded">
-                  <X className="w-4 h-4" />
-                </button>
+                <button onClick={() => setJournalModalPR(null)} className="text-purple-200 hover:text-white transition text-lg">✕</button>
               </div>
 
-              {/* Info Ringkas */}
-              <div className="px-5 py-3 bg-purple-50/50 border-b border-purple-100 flex items-center gap-6 text-xs">
+              {/* Info Row */}
+              <div className="px-6 py-3 bg-purple-50 border-b border-purple-100 flex flex-wrap gap-4 text-xs text-slate-600">
+                <div><span className="font-semibold text-slate-700">Tanggal:</span> {journalModalPR.requestDate}</div>
+                <div><span className="font-semibold text-slate-700">Pemohon:</span> {journalModalPR.requesterName}</div>
+                <div><span className="font-semibold text-slate-700">Departemen:</span> {journalModalPR.department}</div>
                 <div>
-                  <span className="text-slate-500">Judul: </span>
-                  <span className="font-semibold text-slate-800">{journalPR.title}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500">Status: </span>
-                  <span className="font-bold text-purple-800">{journalPR.status}</span>
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                    journalModalPR.status === 'Lunas' ? 'bg-teal-100 text-teal-800 border-teal-200'
+                    : journalModalPR.status === 'Disetujui' ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                    : 'bg-slate-100 text-slate-700 border-slate-200'
+                  }`}>{journalModalPR.status}</span>
                 </div>
               </div>
 
-              {/* Tabel Jurnal */}
-              <div className="p-5 overflow-x-auto">
-                <table className="w-full text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="py-2.5 px-3 text-left font-bold text-slate-600 uppercase tracking-wider w-8">No</th>
-                      <th className="py-2.5 px-3 text-left font-bold text-slate-600 uppercase tracking-wider">Akun COA</th>
-                      <th className="py-2.5 px-3 text-left font-bold text-slate-600 uppercase tracking-wider">Keterangan</th>
-                      <th className="py-2.5 px-3 text-right font-bold text-emerald-700 uppercase tracking-wider">Debit</th>
-                      <th className="py-2.5 px-3 text-right font-bold text-rose-700 uppercase tracking-wider">Kredit</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {entries.map((entry, idx) => (
-                      <tr key={idx} className={`hover:bg-slate-50/70 transition ${entry.debit > 0 ? '' : 'bg-purple-50/30'}`}>
-                        <td className="py-2.5 px-3 text-slate-400 font-mono text-[10px]">{entry.no}</td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-slate-800 text-[10px]">{entry.akun}</td>
-                        <td className="py-2.5 px-3 text-slate-600">{entry.keterangan}</td>
-                        <td className="py-2.5 px-3 text-right font-mono font-semibold text-emerald-700">
-                          {entry.debit > 0 ? formatRupiah(entry.debit) : ''}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono font-semibold text-rose-700">
-                          {entry.kredit > 0 ? formatRupiah(entry.kredit) : ''}
-                        </td>
+              {/* Journal Table */}
+              <div className="p-6">
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-800 text-white">
+                        <th className="py-2.5 px-3 text-left font-bold w-8">#</th>
+                        <th className="py-2.5 px-3 text-left font-bold w-16">Kode COA</th>
+                        <th className="py-2.5 px-3 text-left font-bold">Nama Akun</th>
+                        <th className="py-2.5 px-3 text-left font-bold">Keterangan</th>
+                        <th className="py-2.5 px-3 text-right font-bold w-32">Debit (Rp)</th>
+                        <th className="py-2.5 px-3 text-right font-bold w-32">Kredit (Rp)</th>
                       </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-slate-900 text-white font-bold border-t-2 border-slate-700">
-                      <td colSpan={3} className="py-3 px-3 text-xs uppercase tracking-wider">TOTAL</td>
-                      <td className={`py-3 px-3 text-right font-mono text-emerald-300 ${totalDebit !== totalKredit ? 'text-rose-300' : ''}`}>
-                        {formatRupiah(totalDebit)}
-                      </td>
-                      <td className={`py-3 px-3 text-right font-mono text-rose-300 ${totalDebit !== totalKredit ? 'text-rose-300' : ''}`}>
-                        {formatRupiah(totalKredit)}
-                      </td>
-                    </tr>
-                    {totalDebit !== totalKredit && (
-                      <tr>
-                        <td colSpan={5} className="py-2 px-3 text-center text-xs text-rose-600 font-bold bg-rose-50">
-                          ⚠️ Jurnal tidak balance! Selisih: {formatRupiah(Math.abs(totalDebit - totalKredit))}
-                        </td>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {entries.map((entry, idx) => (
+                        <tr key={idx} className={`${
+                          entry.type === 'Debit' ? 'bg-blue-50/40 hover:bg-blue-50' : 'bg-emerald-50/40 hover:bg-emerald-50'
+                        } transition`}>
+                          <td className="py-2.5 px-3 text-slate-500 font-mono">{entry.no}</td>
+                          <td className="py-2.5 px-3">
+                            <span className="font-mono font-bold text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
+                              {entry.coaCode}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-800">{entry.coaName}</td>
+                          <td className="py-2.5 px-3 text-slate-500 italic truncate max-w-[180px]">{entry.description}</td>
+                          <td className="py-2.5 px-3 text-right font-mono font-semibold text-blue-800">
+                            {entry.type === 'Debit' ? formatRupiah(entry.amount) : '–'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-semibold text-emerald-800">
+                            {entry.type === 'Kredit' ? formatRupiah(entry.amount) : '–'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-800 text-white font-bold">
+                        <td colSpan={4} className="py-2.5 px-3 text-sm uppercase tracking-wider">Total</td>
+                        <td className="py-2.5 px-3 text-right font-mono text-blue-200">{formatRupiah(totalDebit)}</td>
+                        <td className="py-2.5 px-3 text-right font-mono text-emerald-200">{formatRupiah(totalKredit)}</td>
                       </tr>
-                    )}
-                    {totalDebit === totalKredit && (
-                      <tr>
-                        <td colSpan={5} className="py-2 px-3 text-center text-xs text-emerald-700 font-bold bg-emerald-50">
-                          ✓ Jurnal Balance (Debit = Kredit)
-                        </td>
-                      </tr>
-                    )}
-                  </tfoot>
-                </table>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {/* Balance Check */}
+                <div className={`mt-3 flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold ${
+                  isBalanced ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+                }`}>
+                  {isBalanced ? (
+                    <><CheckCircle className="w-4 h-4 text-emerald-600" /> Jurnal Seimbang – Debit = Kredit = {formatRupiah(totalDebit)}</>
+                  ) : (
+                    <><AlertTriangle className="w-4 h-4 text-rose-600" /> Jurnal Tidak Seimbang! Selisih: {formatRupiah(Math.abs(totalDebit - totalKredit))}</>
+                  )}
+                </div>
+
+                {/* Catatan */}
+                <p className="text-[10px] text-slate-400 mt-2">
+                  * Jurnal ini bersifat ilustratif berdasarkan data pengajuan. Posting jurnal definitif terjadi saat status <strong>Lunas</strong>.
+                </p>
               </div>
 
               {/* Footer */}
-              <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-between gap-3 bg-slate-50">
-                <div className="text-[10px] text-slate-400">
-                  Jurnal dibuat otomatis berdasarkan data pengajuan. Verifikasi dengan Buku Besar.
-                </div>
+              <div className="px-6 pb-5 flex justify-end">
                 <button
-                  onClick={() => setJournalPR(null)}
-                  className="px-4 py-2 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-lg transition"
+                  onClick={() => setJournalModalPR(null)}
+                  className="px-5 py-2 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-lg transition shadow-xs"
                 >
                   Tutup
                 </button>
               </div>
+
             </div>
           </div>
         );
       })()}
+
     </div>
   );
 }
