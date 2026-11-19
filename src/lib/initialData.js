@@ -249,36 +249,35 @@ export const INITIAL_PURCHASE_REQUESTS = [
   {
     id: 'pr-3',
     requestNumber: 'PR-202611-003',
-    requestDate: '2026-11-08',
-    dueDate: '2026-11-22',
+    requestDate: '2026-11-13',
+    dueDate: '2026-11-27',
     requesterName: 'Budi Santoso',
     department: 'HR & GA',
-    vendorId: 'vnd-3',
-    vendorName: 'PT Graha Properti Indonesia',
-    title: 'Sewa Ruang Kantor Gedung Menara Lt. 8 Periode Bulan November',
-    description: 'Pembayaran sewa gedung ruang kantor seluas 250 m2 beserta service charge fasilitas bersama.',
-    subtotal: 50000000,
+    vendorId: 'vnd-5',
+    vendorName: 'CV Sentosa Perkasa Konstruksi',
+    title: 'Beban Pemeliharaan & Renovasi Ruang Kantor',
+    description: 'Pekerjaan perbaikan sekat dan pemeliharaan fasilitas ruang kerja kantor.',
+    subtotal: 22000000,
     discount: 0,
-    dpp: 50000000,
-    ppnRate: 11,
-    ppnAmount: 5500000,
+    dpp: 22000000,
+    ppnRate: 1.1,
+    ppnAmount: 242000,
     hasPph: true,
-    pphType: 'PPh 4(2)',
-    pphRate: 10.0,
-    pphAmount: 5000000,
-    pphCoaAccount: '2114',
-    totalPayable: 50500000, // 50jt + 5.5jt - 5jt = 50.5jt
-    paidAmount: 50500000,
-    remainingPayable: 0,
-    grandTotal: 55500000,
-    status: 'Lunas',
-    approvalDate: '2026-11-09',
+    pphType: 'PPh 23',
+    pphRate: 2.0,
+    pphAmount: 440000,
+    pphCoaAccount: '2113',
+    totalPayable: 21802000, // 22jt + 242rb - 440rb = 21.802.000
+    paidAmount: 0,
+    remainingPayable: 21802000,
+    grandTotal: 22242000, // DPP (22jt) + PPN (242rb) = 22.242.000
+    status: 'Disetujui',
+    approvalDate: '2026-11-13',
     approvedBy: 'Irfan Hakim (Direktur Keuangan)',
-    coaDebitAccount: '6102', // Beban Sewa Gedung
-    coaCreditAccount: '1102', // Bank BCA Operasional
+    coaDebitAccount: '6107', // Beban Pemeliharaan & Renovasi
+    coaCreditAccount: '2101', // Hutang Usaha
     items: [
-      { id: 'item-3-1', description: 'Sewa Ruang Kantor 250 m2 Bulan Nov 2026', coaId: '6102', qty: 1, unit: 'Bulan', unitPrice: 40000000, taxRate: 11, subtotal: 40000000 },
-      { id: 'item-3-2', description: 'Service Charge & Fasilitas Gedung', coaId: '6102', qty: 1, unit: 'Bulan', unitPrice: 10000000, taxRate: 11, subtotal: 10000000 }
+      { id: 'item-3-1', description: 'Beban Pemeliharaan & Renovasi Ruang Kantor', coaId: '6107', qty: 1, unit: 'Paket', unitPrice: 22000000, taxRate: 1.1, subtotal: 22000000 }
     ]
   },
   {

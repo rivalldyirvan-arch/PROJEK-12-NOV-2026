@@ -36,7 +36,7 @@ import {
   Download as DownloadIcon
 } from 'lucide-react';
 import { formatRupiah, formatDateIndo, TAX_TYPES, calculateTax } from '../lib/taxRules';
-import { savePurchaseRequest, deletePurchaseRequest, saveVendor, executePurchasePayment, cancelPurchasePayment, getVendorDeposit } from '../lib/databaseService';
+import { savePurchaseRequest, deletePurchaseRequest, saveVendor, executePurchasePayment, cancelPurchasePayment, getVendorDeposit, saveJournalEntry } from '../lib/databaseService';
 import { useAuth } from '../lib/authContext';
 import PurchasePrintPreviewModal from './PurchasePrintPreviewModal';
 import SearchableSelect from '../components/SearchableSelect';
@@ -863,13 +863,44 @@ export default function PurchaseModule({
 
   // Status Action (Approve, Reject, Pay)
   const handleUpdateStatus = async (pr, newStatus) => {
+    const approvalDate = newStatus === 'Disetujui' ? new Date().toISOString() : pr.approvalDate;
+    const approvedBy = newStatus === 'Disetujui' ? (currentUser?.fullName || 'Irfan Hakim (Direktur Keuangan)') : pr.approvedBy;
     const updated = {
       ...pr,
       status: newStatus,
-      approvalDate: newStatus === 'Disetujui' ? new Date().toISOString() : pr.approvalDate,
-      approvedBy: newStatus === 'Disetujui' ? (currentUser?.fullName || 'Irfan Hakim (Direktur Keuangan)') : pr.approvedBy
+      approvalDate,
+      approvedBy
     };
     await savePurchaseRequest(updated);
+
+    // Ketentuan: Diakui sebagai hutang dan masuk ke pembukuan/jurnal ke akun masing-masing ketika statusnya sudah Disetujui
+    if (newStatus === 'Disetujui') {
+      try {
+        const approvalEntries = buildApprovalJournalEntries(updated);
+        const totalDebit = approvalEntries.filter(e => e.type === 'Debit').reduce((s, e) => s + e.amount, 0);
+        const totalCredit = approvalEntries.filter(e => e.type === 'Kredit').reduce((s, e) => s + e.amount, 0);
+        await saveJournalEntry({
+          sourceModule: 'Pembelian',
+          referenceId: updated.id,
+          referenceNo: updated.requestNumber,
+          entryDate: updated.requestDate || new Date().toISOString().slice(0, 10),
+          description: `Pengakuan Hutang Pengadaan: ${updated.title} (${updated.vendorName})`,
+          totalDebit,
+          totalCredit,
+          postedBy: approvedBy,
+          lines: approvalEntries.map(e => ({
+            accountCode: e.coaCode,
+            accountName: e.coaName,
+            description: e.description,
+            debit: e.type === 'Debit' ? e.amount : 0,
+            credit: e.type === 'Kredit' ? e.amount : 0
+          }))
+        });
+      } catch (err) {
+        console.warn('Gagal memposting jurnal pengakuan hutang pengadaan:', err);
+      }
+    }
+
     showToast?.(`Pengajuan ${pr.requestNumber} status diubah ke ${newStatus}`, 'success');
     onRefresh();
   };
@@ -903,6 +934,7 @@ export default function PurchaseModule({
       requestDate: new Date().toISOString().slice(0, 10),
       status: 'Draft',
       paidAmount: 0,
+      remainingPayable: pr.totalPayable || pr.netPayable || 0,
       outstandingAmount: pr.totalPayable || pr.netPayable || 0,
       approvedBy: '',
       paymentHistory: []
@@ -913,13 +945,12 @@ export default function PurchaseModule({
     setOpenActionMenu(null);
   };
 
-  // Build journal entries for a PR (Debit / Kredit breakdown)
-  const buildJournalEntries = (pr) => {
+  // 1. Jurnal Pengakuan Tagihan / Akrual Hutang Usaha (Saat Disetujui)
+  const buildApprovalJournalEntries = (pr) => {
     const entries = [];
     const dpp = Number(pr.dpp) || Number(pr.subtotal) || 0;
     const ppnAmount = Number(pr.ppnAmount) || 0;
-    const pphAmount = Number(pr.pphAmount) || 0;
-    const totalPayable = Number(pr.totalPayable) || (dpp + ppnAmount - pphAmount);
+    const grossPayable = dpp + ppnAmount;
     const vendor = vendorList.find(v => v.id === pr.vendorId);
 
     // 1. Debit: Beban / Aset per line-item
@@ -941,7 +972,6 @@ export default function PurchaseModule({
         });
       });
     } else {
-      // Fallback: single line
       const debitCoa = coaList.find(c => c.code === pr.coaDebitAccount) || {
         code: pr.coaDebitAccount || '6105',
         name: 'Beban Pengadaan'
@@ -968,36 +998,82 @@ export default function PurchaseModule({
       });
     }
 
-    // 3. Kredit: Hutang Pajak PPh (jika ada potongan PPh)
+    // 3. Kredit: Hutang Usaha (COA 2101) dicatat bruto (DPP + PPN) sebelum pemotongan PPh
+    const apCoa = coaList.find(c => c.code === (pr.coaCreditAccount || '2101')) || {
+      code: '2101',
+      name: 'Hutang Usaha (AP)'
+    };
+    entries.push({
+      no: entries.length + 1,
+      type: 'Kredit',
+      coaCode: apCoa.code,
+      coaName: apCoa.name,
+      description: `Hutang Usaha kepada ${pr.vendorName || vendor?.name || '-'}`,
+      amount: grossPayable
+    });
+
+    return entries;
+  };
+
+  // 2. Jurnal Pelunasan Kas & Pemotongan Hutang PPh (Saat Lunas)
+  const buildPaymentJournalEntries = (pr) => {
+    const entries = [];
+    const dpp = Number(pr.dpp) || Number(pr.subtotal) || 0;
+    const ppnAmount = Number(pr.ppnAmount) || 0;
+    const pphAmount = Number(pr.pphAmount) || 0;
+    const grossPayable = dpp + ppnAmount;
+    const netPayable = Number(pr.totalPayable) || (grossPayable - pphAmount);
+    const vendor = vendorList.find(v => v.id === pr.vendorId);
+    const lastPayment = Array.isArray(pr.paymentHistory) && pr.paymentHistory.length > 0 ? pr.paymentHistory[0] : null;
+
+    // 1. Debit: Hutang Usaha (Menutup Hutang Usaha dari Jurnal 1)
+    const apCoa = coaList.find(c => c.code === (pr.coaCreditAccount || '2101')) || {
+      code: '2101',
+      name: 'Hutang Usaha (AP)'
+    };
+    entries.push({
+      no: 1,
+      type: 'Debit',
+      coaCode: apCoa.code,
+      coaName: apCoa.name,
+      description: `Pelunasan Hutang Usaha atas ${pr.requestNumber} (${pr.vendorName || vendor?.name || '-'})`,
+      amount: grossPayable
+    });
+
+    // 2. Kredit: Hutang Pajak PPh (Diakui saat pelunasan kas keluar)
     const hasPphActive = pr.hasPph === true || (pr.hasPph === undefined && pphAmount > 0 && pr.pphType && pr.pphType !== 'Non-PPh');
     if (pphAmount > 0 && hasPphActive) {
-      const pphInfo = PPH_COA_MAP[pr.pphType] || { coaCode: (pr.pphCoaAccount || '2113'), coaName: `Hutang Pajak ${pr.pphType}` };
+      const pphInfo = PPH_COA_MAP[pr.pphType] || { coaCode: (pr.pphCoaAccount || '2113'), coaName: `Hutang Pajak - ${pr.pphType}` };
       entries.push({
         no: entries.length + 1,
         type: 'Kredit',
         coaCode: pphInfo.coaCode,
         coaName: pphInfo.coaName,
-        description: `Potongan ${pr.pphType} (${pr.pphRate}%) atas ${pr.title}`,
+        description: `Pemotongan ${pr.pphType} (${pr.pphRate}%) atas ${pr.title}`,
         amount: pphAmount
       });
     }
 
-    // 4. Kredit: Hutang Usaha (jika belum lunas) / Kas & Bank (jika lunas)
-    const isLunas = pr.status === 'Lunas';
-    const creditCoa = isLunas
-      ? coaList.find(c => c.code === (pr.coaCreditAccount || '1102')) || { code: '1102', name: 'Bank BCA Operasional' }
-      : coaList.find(c => c.code === (pr.coaCreditAccount || '2101')) || { code: '2101', name: 'Hutang Usaha' };
+    // 3. Kredit: Kas & Bank (Pembayaran Net)
+    const payCoaCode = lastPayment?.accountCode || '1102';
+    const payCoa = coaList.find(c => c.code === payCoaCode) || {
+      code: payCoaCode,
+      name: lastPayment?.accountName || 'Bank BCA Operasional'
+    };
     entries.push({
       no: entries.length + 1,
       type: 'Kredit',
-      coaCode: creditCoa.code,
-      coaName: creditCoa.name,
-      description: isLunas ? `Pelunasan ke ${pr.vendorName || vendor?.name || '-'}` : `Hutang Usaha kepada ${pr.vendorName || vendor?.name || '-'}`,
-      amount: totalPayable
+      coaCode: payCoa.code,
+      coaName: payCoa.name,
+      description: `Pembayaran Net via ${lastPayment?.paymentMethod || 'Bank'} kepada ${pr.vendorName || vendor?.name || '-'}`,
+      amount: netPayable
     });
 
     return entries;
   };
+
+  // Helper backward compatibility
+  const buildJournalEntries = (pr) => buildApprovalJournalEntries(pr);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1113,6 +1189,7 @@ export default function PurchaseModule({
                 <th className="py-3 px-4">Vendor Dituju</th>
                 <th className="py-3 px-4">Keperluan Pengadaan</th>
                 <th className="py-3 px-4 text-right">DPP Nilai Bersih</th>
+                <th className="py-3 px-4 text-right">PPN</th>
                 <th className="py-3 px-4 text-right">Pot. PPh</th>
                 <th className="py-3 px-4 text-right">Net Dibayar</th>
                 <th className="py-3 px-4 text-center">Status</th>
@@ -1122,7 +1199,7 @@ export default function PurchaseModule({
             <tbody className="divide-y divide-slate-100">
               {filteredList.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-400">
+                  <td colSpan={11} className="py-12 text-center text-slate-400">
                     Tidak ada pengajuan pembelian yang sesuai filter.
                   </td>
                 </tr>
@@ -1160,6 +1237,18 @@ export default function PurchaseModule({
                       <td className="py-3.5 px-4 text-right font-mono font-semibold text-slate-700">
                         {formatRupiah(pr.dpp)}
                       </td>
+                      {/* Kolom PPN */}
+                      <td className="py-3.5 px-4 text-right font-mono">
+                        {Number(pr.ppnAmount || 0) > 0 ? (
+                          <div>
+                            <span className="font-bold text-emerald-700">+{formatRupiah(pr.ppnAmount)}</span>
+                            <div className="text-[10px] text-slate-500 font-sans">PPN {pr.ppnRate || 11}%</div>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 font-normal">Rp 0 (0%)</span>
+                        )}
+                      </td>
+                      {/* Kolom Pot. PPh */}
                       <td className="py-3.5 px-4 text-right font-mono">
                         {pr.pphType !== 'Non-PPh' && pr.pphAmount > 0 ? (
                           <div>
@@ -1170,6 +1259,7 @@ export default function PurchaseModule({
                           <span className="text-slate-400">-</span>
                         )}
                       </td>
+                      {/* Kolom Net Dibayar */}
                       <td className="py-3.5 px-4 text-right font-mono font-extrabold text-slate-900">
                         {formatRupiah(pr.totalPayable)}
                         {pr.status === 'Lunas' ? (
@@ -1187,7 +1277,7 @@ export default function PurchaseModule({
                         )}
                       </td>
 
-                      {/* Kolom 9: Status */}
+                      {/* Kolom Status */}
                       <td className="py-3.5 px-4 text-center whitespace-nowrap">
                         <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${statusColors[pr.status] || 'bg-slate-100 text-slate-700'}`}>
                           {pr.status}
@@ -2726,15 +2816,27 @@ export default function PurchaseModule({
       {/* MODAL JURNAL AKUNTANSI                                             */}
       {/* ================================================================= */}
       {journalModalPR && (() => {
-        const entries = buildJournalEntries(journalModalPR);
-        const totalDebit = entries.filter(e => e.type === 'Debit').reduce((s, e) => s + e.amount, 0);
-        const totalKredit = entries.filter(e => e.type === 'Kredit').reduce((s, e) => s + e.amount, 0);
-        const isBalanced = Math.abs(totalDebit - totalKredit) < 1;
+        const isLunas = journalModalPR.status === 'Lunas';
+        const approvalEntries = buildApprovalJournalEntries(journalModalPR);
+        const totalDebit1 = approvalEntries.filter(e => e.type === 'Debit').reduce((s, e) => s + e.amount, 0);
+        const totalCredit1 = approvalEntries.filter(e => e.type === 'Kredit').reduce((s, e) => s + e.amount, 0);
+        const isBalanced1 = Math.abs(totalDebit1 - totalCredit1) < 1;
+
+        const paymentEntries = isLunas ? buildPaymentJournalEntries(journalModalPR) : [];
+        const totalDebit2 = paymentEntries.filter(e => e.type === 'Debit').reduce((s, e) => s + e.amount, 0);
+        const totalCredit2 = paymentEntries.filter(e => e.type === 'Kredit').reduce((s, e) => s + e.amount, 0);
+        const isBalanced2 = Math.abs(totalDebit2 - totalCredit2) < 1;
+
+        const lastPayment = Array.isArray(journalModalPR.paymentHistory) && journalModalPR.paymentHistory.length > 0
+          ? journalModalPR.paymentHistory[0]
+          : null;
+        const paymentDateStr = lastPayment?.paymentDate || journalModalPR.paymentDate || journalModalPR.requestDate;
+
         return (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border border-slate-200 overflow-hidden my-6">
+            <div className={`bg-white rounded-2xl shadow-2xl ${isLunas ? 'max-w-6xl' : 'max-w-2xl'} w-full border border-slate-200 overflow-hidden my-6 transition-all`}>
 
-              {/* Header */}
+              {/* Top Header */}
               <div className="bg-gradient-to-r from-purple-900 to-purple-700 px-6 py-4 text-white flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-bold flex items-center gap-2">
@@ -2743,91 +2845,210 @@ export default function PurchaseModule({
                   </h3>
                   <p className="text-xs text-purple-200 mt-0.5">{journalModalPR.title} • {journalModalPR.vendorName}</p>
                 </div>
-                <button onClick={() => setJournalModalPR(null)} className="text-purple-200 hover:text-white transition text-lg">✕</button>
+                <button onClick={() => setJournalModalPR(null)} className="text-purple-200 hover:text-white transition text-lg cursor-pointer">✕</button>
               </div>
 
-              {/* Info Row */}
-              <div className="px-6 py-3 bg-purple-50 border-b border-purple-100 flex flex-wrap gap-4 text-xs text-slate-600">
-                <div><span className="font-semibold text-slate-700">Tanggal:</span> {journalModalPR.requestDate}</div>
-                <div><span className="font-semibold text-slate-700">Pemohon:</span> {journalModalPR.requesterName}</div>
-                <div><span className="font-semibold text-slate-700">Departemen:</span> {journalModalPR.department}</div>
-                <div>
-                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                    journalModalPR.status === 'Lunas' ? 'bg-teal-100 text-teal-800 border-teal-200'
-                    : journalModalPR.status === 'Disetujui' ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                    : 'bg-slate-100 text-slate-700 border-slate-200'
-                  }`}>{journalModalPR.status}</span>
-                </div>
-              </div>
-
-              {/* Journal Table */}
+              {/* Main Container */}
               <div className="p-6">
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  <table className="w-full text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-slate-800 text-white">
-                        <th className="py-2.5 px-3 text-left font-bold w-8">#</th>
-                        <th className="py-2.5 px-3 text-left font-bold w-16">Kode COA</th>
-                        <th className="py-2.5 px-3 text-left font-bold">Nama Akun</th>
-                        <th className="py-2.5 px-3 text-left font-bold">Keterangan</th>
-                        <th className="py-2.5 px-3 text-right font-bold w-32">Debit (Rp)</th>
-                        <th className="py-2.5 px-3 text-right font-bold w-32">Kredit (Rp)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {entries.map((entry, idx) => (
-                        <tr key={idx} className={`${
-                          entry.type === 'Debit' ? 'bg-blue-50/40 hover:bg-blue-50' : 'bg-emerald-50/40 hover:bg-emerald-50'
-                        } transition`}>
-                          <td className="py-2.5 px-3 text-slate-500 font-mono">{entry.no}</td>
-                          <td className="py-2.5 px-3">
-                            <span className="font-mono font-bold text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
-                              {entry.coaCode}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3 font-semibold text-slate-800">{entry.coaName}</td>
-                          <td className="py-2.5 px-3 text-slate-500 italic truncate max-w-[180px]">{entry.description}</td>
-                          <td className="py-2.5 px-3 text-right font-mono font-semibold text-blue-800">
-                            {entry.type === 'Debit' ? formatRupiah(entry.amount) : '–'}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-mono font-semibold text-emerald-800">
-                            {entry.type === 'Kredit' ? formatRupiah(entry.amount) : '–'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-slate-800 text-white font-bold">
-                        <td colSpan={4} className="py-2.5 px-3 text-sm uppercase tracking-wider">Total</td>
-                        <td className="py-2.5 px-3 text-right font-mono text-blue-200">{formatRupiah(totalDebit)}</td>
-                        <td className="py-2.5 px-3 text-right font-mono text-emerald-200">{formatRupiah(totalKredit)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                <div className={`grid grid-cols-1 ${isLunas ? 'lg:grid-cols-2' : ''} gap-6`}>
 
-                {/* Balance Check */}
-                <div className={`mt-3 flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold ${
-                  isBalanced ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
-                }`}>
-                  {isBalanced ? (
-                    <><CheckCircle className="w-4 h-4 text-emerald-600" /> Jurnal Seimbang – Debit = Kredit = {formatRupiah(totalDebit)}</>
-                  ) : (
-                    <><AlertTriangle className="w-4 h-4 text-rose-600" /> Jurnal Tidak Seimbang! Selisih: {formatRupiah(Math.abs(totalDebit - totalKredit))}</>
+                  {/* ======================================================== */}
+                  {/* PANEL 1: JURNAL PENGAKUAN TAGIHAN (AKRUAL HUTANG USAHA)  */}
+                  {/* ======================================================== */}
+                  <div className="bg-slate-50/50 rounded-2xl border border-slate-200 p-4 flex flex-col justify-between">
+                    <div>
+                      {/* Panel Title & Info Bar */}
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-purple-100 text-purple-800 font-bold text-xs flex items-center justify-center">1</span>
+                          <div>
+                            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                              Jurnal Pengakuan Tagihan (Hutang Usaha)
+                            </h4>
+                            <span className="text-[10px] text-slate-500">Dibukukan saat status Disetujui</span>
+                          </div>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                          journalModalPR.status === 'Draft' ? 'bg-slate-100 text-slate-700'
+                          : journalModalPR.status === 'Menunggu Persetujuan' ? 'bg-amber-100 text-amber-800 border-amber-200'
+                          : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                        }`}>
+                          {journalModalPR.status === 'Draft' || journalModalPR.status === 'Menunggu Persetujuan' ? journalModalPR.status : 'Disetujui'}
+                        </span>
+                      </div>
+
+                      <div className="px-3 py-2 bg-purple-50/60 rounded-lg border border-purple-100 mb-3 text-[11px] text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
+                        <div><span className="font-semibold text-slate-700">Tanggal:</span> {journalModalPR.requestDate}</div>
+                        <div><span className="font-semibold text-slate-700">Pemohon:</span> {journalModalPR.requesterName}</div>
+                        <div><span className="font-semibold text-slate-700">Departemen:</span> {journalModalPR.department}</div>
+                      </div>
+
+                      {/* Table 1 */}
+                      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                        <table className="w-full text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-slate-800 text-white">
+                              <th className="py-2 px-2.5 text-left font-bold w-6">#</th>
+                              <th className="py-2 px-2.5 text-left font-bold w-14">Kode</th>
+                              <th className="py-2 px-2.5 text-left font-bold">Nama Akun</th>
+                              <th className="py-2 px-2.5 text-left font-bold hidden sm:table-cell">Keterangan</th>
+                              <th className="py-2 px-2.5 text-right font-bold w-24">Debit (Rp)</th>
+                              <th className="py-2 px-2.5 text-right font-bold w-24">Kredit (Rp)</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-[11px]">
+                            {approvalEntries.map((entry, idx) => (
+                              <tr key={idx} className={`${
+                                entry.type === 'Debit' ? 'bg-blue-50/30 hover:bg-blue-50/60' : 'bg-emerald-50/30 hover:bg-emerald-50/60'
+                              } transition`}>
+                                <td className="py-2 px-2.5 text-slate-400 font-mono">{entry.no}</td>
+                                <td className="py-2 px-2.5">
+                                  <span className="font-mono font-bold text-[9px] bg-slate-100 text-slate-700 px-1 py-0.5 rounded border border-slate-200">
+                                    {entry.coaCode}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2.5 font-semibold text-slate-800">{entry.coaName}</td>
+                                <td className="py-2 px-2.5 text-slate-500 italic truncate max-w-[130px] hidden sm:table-cell">{entry.description}</td>
+                                <td className="py-2 px-2.5 text-right font-mono font-semibold text-blue-800">
+                                  {entry.type === 'Debit' ? formatRupiah(entry.amount) : '–'}
+                                </td>
+                                <td className="py-2 px-2.5 text-right font-mono font-semibold text-emerald-800">
+                                  {entry.type === 'Kredit' ? formatRupiah(entry.amount) : '–'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="bg-slate-800 text-white font-bold text-[11px]">
+                              <td colSpan={3} className="py-2 px-2.5 uppercase tracking-wider text-[10px]">TOTAL</td>
+                              <td className="py-2 px-2.5 hidden sm:table-cell"></td>
+                              <td className="py-2 px-2.5 text-right font-mono text-blue-200">{formatRupiah(totalDebit1)}</td>
+                              <td className="py-2 px-2.5 text-right font-mono text-emerald-200">{formatRupiah(totalCredit1)}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold ${
+                        isBalanced1 ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+                      }`}>
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                        <span>Jurnal Seimbang – Debit = Kredit = {formatRupiah(totalDebit1)}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1.5">
+                        * Diakui sebagai Hutang Usaha bruto (DPP + PPN). Hutang PPh belum diakui pada tahap ini.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* ======================================================== */}
+                  {/* PANEL 2: JURNAL PELUNASAN KAS & HUTANG PPH (SAAT LUNAS) */}
+                  {/* ======================================================== */}
+                  {isLunas && (
+                    <div className="bg-slate-50/50 rounded-2xl border border-slate-200 p-4 flex flex-col justify-between">
+                      <div>
+                        {/* Panel Title & Info Bar */}
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-200 mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-full bg-teal-100 text-teal-800 font-bold text-xs flex items-center justify-center">2</span>
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                                Jurnal Pelunasan Kas & Pengakuan Hutang PPh
+                              </h4>
+                              <span className="text-[10px] text-teal-700 font-medium">Dibukukan saat Pelunasan (Lunas)</span>
+                            </div>
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border bg-teal-100 text-teal-800 border-teal-200">
+                            Lunas
+                          </span>
+                        </div>
+
+                        <div className="px-3 py-2 bg-teal-50/60 rounded-lg border border-teal-100 mb-3 text-[11px] text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
+                          <div><span className="font-semibold text-slate-700">Tanggal Bayar:</span> {paymentDateStr}</div>
+                          <div><span className="font-semibold text-slate-700">Metode:</span> {lastPayment?.paymentMethod || 'Bank'}</div>
+                          <div><span className="font-semibold text-slate-700">Akun:</span> {lastPayment?.accountName || 'Bank BCA Operasional'}</div>
+                        </div>
+
+                        {/* Table 2 */}
+                        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-800 text-white">
+                                <th className="py-2 px-2.5 text-left font-bold w-6">#</th>
+                                <th className="py-2 px-2.5 text-left font-bold w-14">Kode</th>
+                                <th className="py-2 px-2.5 text-left font-bold">Nama Akun</th>
+                                <th className="py-2 px-2.5 text-left font-bold hidden sm:table-cell">Keterangan</th>
+                                <th className="py-2 px-2.5 text-right font-bold w-24">Debit (Rp)</th>
+                                <th className="py-2 px-2.5 text-right font-bold w-24">Kredit (Rp)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 text-[11px]">
+                              {paymentEntries.map((entry, idx) => (
+                                <tr key={idx} className={`${
+                                  entry.type === 'Debit' ? 'bg-blue-50/30 hover:bg-blue-50/60' : 'bg-emerald-50/30 hover:bg-emerald-50/60'
+                                } transition`}>
+                                  <td className="py-2 px-2.5 text-slate-400 font-mono">{entry.no}</td>
+                                  <td className="py-2 px-2.5">
+                                    <span className="font-mono font-bold text-[9px] bg-slate-100 text-slate-700 px-1 py-0.5 rounded border border-slate-200">
+                                      {entry.coaCode}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-2.5 font-semibold text-slate-800">{entry.coaName}</td>
+                                  <td className="py-2 px-2.5 text-slate-500 italic truncate max-w-[130px] hidden sm:table-cell">{entry.description}</td>
+                                  <td className="py-2 px-2.5 text-right font-mono font-semibold text-blue-800">
+                                    {entry.type === 'Debit' ? formatRupiah(entry.amount) : '–'}
+                                  </td>
+                                  <td className="py-2 px-2.5 text-right font-mono font-semibold text-emerald-800">
+                                    {entry.type === 'Kredit' ? formatRupiah(entry.amount) : '–'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="bg-slate-800 text-white font-bold text-[11px]">
+                                <td colSpan={3} className="py-2 px-2.5 uppercase tracking-wider text-[10px]">TOTAL</td>
+                                <td className="py-2 px-2.5 hidden sm:table-cell"></td>
+                                <td className="py-2 px-2.5 text-right font-mono text-blue-200">{formatRupiah(totalDebit2)}</td>
+                                <td className="py-2 px-2.5 text-right font-mono text-emerald-200">{formatRupiah(totalCredit2)}</td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div className="mt-3">
+                        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold ${
+                          isBalanced2 ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+                        }`}>
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                          <span>Jurnal Seimbang – Debit = Kredit = {formatRupiah(totalDebit2)}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1.5">
+                          * Hutang Usaha ditutup penuh, Hutang PPh terutang dibukukan pada masa {paymentDateStr.slice(5, 7)}/{paymentDateStr.slice(0, 4)} dan masuk Modul Pajak.
+                        </p>
+                      </div>
+                    </div>
                   )}
+
                 </div>
 
-                {/* Catatan */}
-                <p className="text-[10px] text-slate-400 mt-2">
-                  * Jurnal ini bersifat ilustratif berdasarkan data pengajuan. Posting jurnal definitif terjadi saat status <strong>Lunas</strong>.
-                </p>
+                {!isLunas && (
+                  <div className="mt-4 p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                    <span>
+                      Pengajuan ini belum lunas. Jurnal Pelunasan Kas & Pengakuan Hutang PPh akan otomatis terbentuk dan tampil di panel sebelah kanan setelah pelunasan pembayaran dilakukan.
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Footer */}
               <div className="px-6 pb-5 flex justify-end">
                 <button
                   onClick={() => setJournalModalPR(null)}
-                  className="px-5 py-2 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-lg transition shadow-xs"
+                  className="px-5 py-2 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-lg transition shadow-xs cursor-pointer"
                 >
                   Tutup
                 </button>

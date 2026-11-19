@@ -438,12 +438,23 @@ export async function deletePurchaseRequest(id) {
   return true;
 }
 
-// Auto sync tax record when PR has PPh
+// Auto sync tax record when PR has PPh (Hutang PPh diakui saat status Lunas berdasarkan tanggal pembayaran)
 async function autoSyncTaxRecordFromPurchase(pr) {
   const taxList = await fetchTaxRecords();
   const existing = taxList.find(t => t.referenceNo === pr.requestNumber);
   
-  const d = new Date(pr.requestDate);
+  // Jika pengajuan belum Lunas, jangan akui hutang PPh dulu (hapus jika pernah tersimpan)
+  if (pr.status !== 'Lunas') {
+    if (existing && existing.sourceModule === 'Pembelian') {
+      await deleteTaxRecord(existing.id);
+    }
+    return;
+  }
+
+  // Jika Lunas: Tentukan masa/bulan pajak berdasarkan tanggal pembayaran pelunasan
+  const lastPayment = Array.isArray(pr.paymentHistory) && pr.paymentHistory.length > 0 ? pr.paymentHistory[0] : null;
+  const payDate = lastPayment?.paymentDate || pr.paymentDate || new Date().toISOString().slice(0, 10);
+  const d = new Date(payDate);
   const month = d.getMonth() + 1;
   const year = d.getFullYear();
 
@@ -452,7 +463,7 @@ async function autoSyncTaxRecordFromPurchase(pr) {
     taxType: pr.pphType,
     taxPeriodMonth: month,
     taxPeriodYear: year,
-    transactionDate: pr.requestDate,
+    transactionDate: payDate,
     referenceNo: pr.requestNumber,
     sourceModule: 'Pembelian',
     vendorId: pr.vendorId || null,
@@ -460,16 +471,16 @@ async function autoSyncTaxRecordFromPurchase(pr) {
     taxpayerNpwp: '',
     hasNpwp: true,
     taxObjectCode: pr.pphType === 'PPh 23' ? '24-104-01' : (pr.pphType === 'PPh 4(2)' ? '28-401-01' : '21-100-02'),
-    taxObjectDescription: `Pemotongan ${pr.pphType} atas ${pr.title}`,
-    grossAmount: pr.subtotal,
-    dppAmount: pr.dpp,
-    taxRate: pr.pphRate,
-    taxAmount: pr.pphAmount,
+    taxObjectDescription: `Pemotongan ${pr.pphType} atas pelunasan ${pr.title}`,
+    grossAmount: Number(pr.subtotal || pr.dpp || 0),
+    dppAmount: Number(pr.dpp || 0),
+    taxRate: Number(pr.pphRate || 0),
+    taxAmount: Number(pr.pphAmount || 0),
     billingId: existing?.billingId || '',
     ntpn: existing?.ntpn || '',
-    paymentDate: existing?.paymentDate || null,
-    status: pr.status === 'Lunas' ? (existing?.status || 'Lunas / Disetor (NTPN)') : (existing?.status || 'Draft / Belum Disetor'),
-    notes: `Otomatis dibuat dari Pengajuan Pembelian ${pr.requestNumber}`
+    paymentDate: payDate,
+    status: existing?.status || 'Lunas / Disetor (NTPN)',
+    notes: `Otomatis dibukukan pada masa ${month}/${year} dari Pelunasan PR ${pr.requestNumber} (Tgl Bayar: ${payDate})`
   };
 
   await saveTaxRecord(taxRecord);
@@ -907,6 +918,61 @@ export async function executePurchasePayment({
 
     const saved = await savePurchaseRequest(updatedPRData);
     updatedPRs.push(saved);
+
+    // Jika Lunas: Bukukan Jurnal Pelunasan Kas & Pengakuan Hutang PPh ke Buku Besar
+    if (isFullyPaid) {
+      try {
+        const dpp = Number(pr.dpp) || Number(pr.subtotal) || 0;
+        const ppn = Number(pr.ppnAmount) || 0;
+        const pph = Number(pr.pphAmount) || 0;
+        const grossPayable = dpp + ppn;
+        const netPayable = Number(pr.totalPayable) || (grossPayable - pph);
+        const pphCoa = pr.pphCoaAccount || (pr.pphType === 'PPh 23' ? '2113' : (pr.pphType === 'PPh 4(2)' ? '2114' : (pr.pphType === 'PPh 21' ? '2111' : (pr.pphType === 'PPh 22' ? '2112' : '2116'))));
+        const pphName = pr.pphType || 'PPh Withholding';
+
+        const lines = [
+          {
+            accountCode: pr.coaCreditAccount || '2101',
+            accountName: 'Hutang Usaha (AP)',
+            description: `Pelunasan Hutang Usaha atas ${pr.requestNumber} (${pr.vendorName})`,
+            debit: grossPayable,
+            credit: 0
+          }
+        ];
+
+        if (pph > 0) {
+          lines.push({
+            accountCode: pphCoa,
+            accountName: `Hutang Pajak - ${pphName}`,
+            description: `Pemotongan ${pphName} (${pr.pphRate || 0}%) atas ${pr.title}`,
+            debit: 0,
+            credit: pph
+          });
+        }
+
+        lines.push({
+          accountCode: accountCode || (paymentMethod === 'Kas' ? '1101' : '1102'),
+          accountName: accountName || (paymentMethod === 'Kas' ? 'Kas Kantor' : 'Bank BCA Operasional'),
+          description: `Pembayaran Net via ${paymentMethod} kepada ${pr.vendorName}`,
+          debit: 0,
+          credit: netPayable
+        });
+
+        await saveJournalEntry({
+          sourceModule: 'Pembelian (Pelunasan)',
+          referenceId: pr.id,
+          referenceNo: referenceNo || `PAY-${pr.requestNumber}`,
+          entryDate: paymentDate,
+          description: `Pelunasan Kas & Pemotongan PPh: ${pr.requestNumber} (${pr.vendorName})`,
+          totalDebit: grossPayable,
+          totalCredit: grossPayable,
+          postedBy: currentUser?.fullName || 'Staff Keuangan',
+          lines
+        });
+      } catch (err) {
+        console.warn('Gagal memposting jurnal pelunasan:', err);
+      }
+    }
   }
 
   // 5. Simpan Audit Trail Transaksi Pembayaran
