@@ -193,10 +193,14 @@ export const INITIAL_PURCHASE_REQUESTS = [
     dpp: 30000000,
     ppnRate: 11,
     ppnAmount: 3300000,
+    hasPph: true,
     pphType: 'PPh 23',
     pphRate: 2.0,
     pphAmount: 600000,
+    pphCoaAccount: '2113',
     totalPayable: 32700000, // DPP (30jt) + PPN (3.3jt) - PPh 23 (600rb)
+    paidAmount: 0,
+    remainingPayable: 32700000,
     grandTotal: 33300000, // DPP + PPN
     status: 'Disetujui',
     approvalDate: '2026-11-03',
@@ -204,8 +208,8 @@ export const INITIAL_PURCHASE_REQUESTS = [
     coaDebitAccount: '5102', // Biaya Server Cloud
     coaCreditAccount: '2101', // Hutang Usaha
     items: [
-      { id: 'item-1-1', description: 'Cloud Server Compute EC2 Multi-AZ', coaId: '5102', qty: 2, unit: 'Bulan', unitPrice: 10000000, subtotal: 20000000 },
-      { id: 'item-1-2', description: 'Cloud Relational Database Cluster PostgreSQL', coaId: '5102', qty: 2, unit: 'Bulan', unitPrice: 5000000, subtotal: 10000000 }
+      { id: 'item-1-1', description: 'Cloud Server Compute EC2 Multi-AZ', coaId: '5102', qty: 2, unit: 'Bulan', unitPrice: 10000000, taxRate: 11, subtotal: 20000000 },
+      { id: 'item-1-2', description: 'Cloud Relational Database Cluster PostgreSQL', coaId: '5102', qty: 2, unit: 'Bulan', unitPrice: 5000000, taxRate: 11, subtotal: 10000000 }
     ]
   },
   {
@@ -224,10 +228,14 @@ export const INITIAL_PURCHASE_REQUESTS = [
     dpp: 15000000,
     ppnRate: 11,
     ppnAmount: 1650000,
+    hasPph: true,
     pphType: 'PPh 23',
     pphRate: 2.0,
     pphAmount: 300000,
+    pphCoaAccount: '2113',
     totalPayable: 16350000,
+    paidAmount: 0,
+    remainingPayable: 16350000,
     grandTotal: 16650000,
     status: 'Disetujui',
     approvalDate: '2026-11-06',
@@ -235,7 +243,7 @@ export const INITIAL_PURCHASE_REQUESTS = [
     coaDebitAccount: '6103', // Beban Konsultan Hukum, Pajak & Akuntansi
     coaCreditAccount: '2101',
     items: [
-      { id: 'item-2-1', description: 'Retainer Fee Konsultan Pajak Bulan Nov 2026', coaId: '6103', qty: 1, unit: 'Bulan', unitPrice: 15000000, subtotal: 15000000 }
+      { id: 'item-2-1', description: 'Retainer Fee Konsultan Pajak Bulan Nov 2026', coaId: '6103', qty: 1, unit: 'Bulan', unitPrice: 15000000, taxRate: 11, subtotal: 15000000 }
     ]
   },
   {
@@ -254,10 +262,14 @@ export const INITIAL_PURCHASE_REQUESTS = [
     dpp: 50000000,
     ppnRate: 11,
     ppnAmount: 5500000,
+    hasPph: true,
     pphType: 'PPh 4(2)',
     pphRate: 10.0,
     pphAmount: 5000000,
+    pphCoaAccount: '2114',
     totalPayable: 50500000, // 50jt + 5.5jt - 5jt = 50.5jt
+    paidAmount: 50500000,
+    remainingPayable: 0,
     grandTotal: 55500000,
     status: 'Lunas',
     approvalDate: '2026-11-09',
@@ -265,8 +277,8 @@ export const INITIAL_PURCHASE_REQUESTS = [
     coaDebitAccount: '6102', // Beban Sewa Gedung
     coaCreditAccount: '1102', // Bank BCA Operasional
     items: [
-      { id: 'item-3-1', description: 'Sewa Ruang Kantor 250 m2 Bulan Nov 2026', coaId: '6102', qty: 1, unit: 'Bulan', unitPrice: 40000000, subtotal: 40000000 },
-      { id: 'item-3-2', description: 'Service Charge & Fasilitas Gedung', coaId: '6102', qty: 1, unit: 'Bulan', unitPrice: 10000000, subtotal: 10000000 }
+      { id: 'item-3-1', description: 'Sewa Ruang Kantor 250 m2 Bulan Nov 2026', coaId: '6102', qty: 1, unit: 'Bulan', unitPrice: 40000000, taxRate: 11, subtotal: 40000000 },
+      { id: 'item-3-2', description: 'Service Charge & Fasilitas Gedung', coaId: '6102', qty: 1, unit: 'Bulan', unitPrice: 10000000, taxRate: 11, subtotal: 10000000 }
     ]
   },
   {
@@ -285,10 +297,14 @@ export const INITIAL_PURCHASE_REQUESTS = [
     dpp: 20000000,
     ppnRate: 0,
     ppnAmount: 0,
+    hasPph: true,
     pphType: 'PPh 21',
     pphRate: 2.5, // 50% x 5% = 2.5% tenaga ahli
     pphAmount: 500000,
+    pphCoaAccount: '2111',
     totalPayable: 19500000, // 20jt - 500rb
+    paidAmount: 0,
+    remainingPayable: 19500000,
     grandTotal: 20000000,
     status: 'Menunggu Persetujuan',
     approvalDate: null,
@@ -296,7 +312,7 @@ export const INITIAL_PURCHASE_REQUESTS = [
     coaDebitAccount: '6103',
     coaCreditAccount: '2102',
     items: [
-      { id: 'item-4-1', description: 'Jasa Desain Arsitektur & Supervisi Layout 3D', coaId: '6103', qty: 1, unit: 'Paket', unitPrice: 20000000, subtotal: 20000000 }
+      { id: 'item-4-1', description: 'Jasa Desain Arsitektur & Supervisi Layout 3D', coaId: '6103', qty: 1, unit: 'Paket', unitPrice: 20000000, taxRate: 0, subtotal: 20000000 }
     ]
   },
   {
@@ -315,10 +331,14 @@ export const INITIAL_PURCHASE_REQUESTS = [
     dpp: 35000000,
     ppnRate: 11,
     ppnAmount: 3850000,
+    hasPph: true,
     pphType: 'PPh 4(2)',
     pphRate: 1.75, // Jasa Konstruksi Kualifikasi Kecil
     pphAmount: 612500,
+    pphCoaAccount: '2114',
     totalPayable: 38237500,
+    paidAmount: 0,
+    remainingPayable: 38237500,
     grandTotal: 38850000,
     status: 'Menunggu Persetujuan',
     approvalDate: null,
@@ -326,8 +346,8 @@ export const INITIAL_PURCHASE_REQUESTS = [
     coaDebitAccount: '6107', // Beban Pemeliharaan & Renovasi
     coaCreditAccount: '2101',
     items: [
-      { id: 'item-5-1', description: 'Pekerjaan Partisi Kaca Tempered 10mm & Pintu Akses', coaId: '6107', qty: 1, unit: 'Paket', unitPrice: 22000000, subtotal: 22000000 },
-      { id: 'item-5-2', description: 'Pekerjaan Pengkabelan & Panel Listrik Server', coaId: '6107', qty: 1, unit: 'Paket', unitPrice: 13000000, subtotal: 13000000 }
+      { id: 'item-5-1', description: 'Pekerjaan Partisi Kaca Tempered 10mm & Pintu Akses', coaId: '6107', qty: 1, unit: 'Paket', unitPrice: 22000000, taxRate: 11, subtotal: 22000000 },
+      { id: 'item-5-2', description: 'Pekerjaan Pengkabelan & Panel Listrik Server', coaId: '6107', qty: 1, unit: 'Paket', unitPrice: 13000000, taxRate: 11, subtotal: 13000000 }
     ]
   }
 ];

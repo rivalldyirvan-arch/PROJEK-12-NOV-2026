@@ -922,12 +922,15 @@ export default function PurchaseModule({
     const totalPayable = Number(pr.totalPayable) || (dpp + ppnAmount - pphAmount);
     const vendor = vendorList.find(v => v.id === pr.vendorId);
 
-    // 1. Per line-item: Debit Beban/Aset
+    // 1. Debit: Beban / Aset per line-item
     if (pr.items && pr.items.length > 0) {
       pr.items.forEach((item, idx) => {
         const sub = Number(item.subtotal) || 0;
         if (sub === 0) return;
-        const coaAccount = coaList.find(c => c.code === item.coaId) || { code: item.coaId || pr.coaDebitAccount || '6105', name: item.description || 'Beban Pengadaan' };
+        const coaAccount = coaList.find(c => c.code === item.coaId) || {
+          code: item.coaId || pr.coaDebitAccount || '6105',
+          name: item.description || 'Beban Pengadaan'
+        };
         entries.push({
           no: entries.length + 1,
           type: 'Debit',
@@ -936,22 +939,13 @@ export default function PurchaseModule({
           description: item.description || pr.title,
           amount: sub
         });
-        // Per-line PPN
-        const linePpn = Math.round((sub * (Number(item.taxRate) || 0)) / 100);
-        if (linePpn > 0) {
-          entries.push({
-            no: entries.length + 1,
-            type: 'Debit',
-            coaCode: '1601',
-            coaName: 'PPN Masukan',
-            description: `PPN ${item.taxRate}% atas ${item.description || pr.title}`,
-            amount: linePpn
-          });
-        }
       });
     } else {
       // Fallback: single line
-      const debitCoa = coaList.find(c => c.code === pr.coaDebitAccount) || { code: pr.coaDebitAccount || '6105', name: 'Beban Pengadaan' };
+      const debitCoa = coaList.find(c => c.code === pr.coaDebitAccount) || {
+        code: pr.coaDebitAccount || '6105',
+        name: 'Beban Pengadaan'
+      };
       entries.push({
         no: 1,
         type: 'Debit',
@@ -960,21 +954,24 @@ export default function PurchaseModule({
         description: pr.title,
         amount: dpp
       });
-      if (ppnAmount > 0) {
-        entries.push({
-          no: entries.length + 1,
-          type: 'Debit',
-          coaCode: '1601',
-          coaName: 'PPN Masukan',
-          description: `PPN atas ${pr.title}`,
-          amount: ppnAmount
-        });
-      }
     }
 
-    // 2. Kredit: Hutang PPh (jika ada potongan PPh)
-    if (pphAmount > 0 && pr.hasPph) {
-      const pphInfo = PPH_COA_MAP[pr.pphType] || { coaCode: '2113', coaName: 'Hutang Pajak PPh' };
+    // 2. Debit: PPN Masukan (COA 1601) jika ada nilai PPN
+    if (ppnAmount > 0) {
+      entries.push({
+        no: entries.length + 1,
+        type: 'Debit',
+        coaCode: '1601',
+        coaName: 'PPN Masukan (Pajak Masukan)',
+        description: `PPN Masukan (${pr.ppnRate || 11}%) atas ${pr.title}`,
+        amount: ppnAmount
+      });
+    }
+
+    // 3. Kredit: Hutang Pajak PPh (jika ada potongan PPh)
+    const hasPphActive = pr.hasPph === true || (pr.hasPph === undefined && pphAmount > 0 && pr.pphType && pr.pphType !== 'Non-PPh');
+    if (pphAmount > 0 && hasPphActive) {
+      const pphInfo = PPH_COA_MAP[pr.pphType] || { coaCode: (pr.pphCoaAccount || '2113'), coaName: `Hutang Pajak ${pr.pphType}` };
       entries.push({
         no: entries.length + 1,
         type: 'Kredit',
@@ -985,17 +982,17 @@ export default function PurchaseModule({
       });
     }
 
-    // 3. Kredit: Hutang Usaha / Kas & Bank
+    // 4. Kredit: Hutang Usaha (jika belum lunas) / Kas & Bank (jika lunas)
     const isLunas = pr.status === 'Lunas';
     const creditCoa = isLunas
-      ? coaList.find(c => c.code === '1102') || { code: '1102', name: 'Kas & Bank' }
-      : coaList.find(c => c.code === pr.coaCreditAccount) || { code: pr.coaCreditAccount || '2101', name: 'Hutang Usaha' };
+      ? coaList.find(c => c.code === (pr.coaCreditAccount || '1102')) || { code: '1102', name: 'Bank BCA Operasional' }
+      : coaList.find(c => c.code === (pr.coaCreditAccount || '2101')) || { code: '2101', name: 'Hutang Usaha' };
     entries.push({
       no: entries.length + 1,
       type: 'Kredit',
       coaCode: creditCoa.code,
       coaName: creditCoa.name,
-      description: isLunas ? `Pembayaran ke ${pr.vendorName || vendor?.name || '-'}` : `Hutang kepada ${pr.vendorName || vendor?.name || '-'}`,
+      description: isLunas ? `Pelunasan ke ${pr.vendorName || vendor?.name || '-'}` : `Hutang Usaha kepada ${pr.vendorName || vendor?.name || '-'}`,
       amount: totalPayable
     });
 
@@ -1174,10 +1171,18 @@ export default function PurchaseModule({
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono font-extrabold text-slate-900">
-                        {formatRupiah(payableAmount)}
-                        {pr.paidAmount > 0 && (
+                        {formatRupiah(pr.totalPayable)}
+                        {pr.status === 'Lunas' ? (
+                          <div className="text-[10px] text-teal-600 font-bold">
+                            Lunas Terbayar
+                          </div>
+                        ) : pr.status === 'Sebagian Dibayar' ? (
+                          <div className="text-[10px] text-sky-700 font-medium">
+                            Terbayar: {formatRupiah(pr.paidAmount)} • Sisa: {formatRupiah(pr.remainingPayable)}
+                          </div>
+                        ) : (
                           <div className="text-[10px] text-slate-400 font-normal">
-                            Terbayar: {formatRupiah(pr.paidAmount)}
+                            Sisa: {formatRupiah(pr.remainingPayable !== undefined ? pr.remainingPayable : pr.totalPayable)}
                           </div>
                         )}
                       </td>

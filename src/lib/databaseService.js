@@ -294,9 +294,11 @@ export async function fetchPurchaseRequests() {
             dpp: Number(item.dpp || 0),
             ppnRate: Number(item.ppn_rate || 0),
             ppnAmount: Number(item.ppn_amount || 0),
+            hasPph: item.has_pph !== undefined ? Boolean(item.has_pph) : (item.pph_type && item.pph_type !== 'Non-PPh' && Number(item.pph_amount || 0) > 0),
             pphType: item.pph_type,
             pphRate: Number(item.pph_rate || 0),
             pphAmount: Number(item.pph_amount || 0),
+            pphCoaAccount: item.pph_coa_account || '',
             totalPayable: origPayable,
             remainingPayable: meta.remainingPayable !== undefined ? Number(meta.remainingPayable) : (item.status === 'Lunas' ? 0 : origPayable),
             paidAmount: meta.paidAmount !== undefined ? Number(meta.paidAmount) : (item.status === 'Lunas' ? origPayable : 0),
@@ -307,7 +309,10 @@ export async function fetchPurchaseRequests() {
             approvedBy: item.approved_by,
             coaDebitAccount: item.coa_debit_account,
             coaCreditAccount: item.coa_credit_account,
-            items: item.items || []
+            items: (item.items || []).map(it => ({
+              ...it,
+              taxRate: it.taxRate !== undefined ? Number(it.taxRate) : (Number(item.ppn_rate) || 0)
+            }))
           };
         });
       }
@@ -323,9 +328,14 @@ export async function fetchPurchaseRequests() {
     const origPayable = Number(item.totalPayable || 0);
     return {
       ...item,
+      hasPph: item.hasPph !== undefined ? Boolean(item.hasPph) : (item.pphType && item.pphType !== 'Non-PPh' && Number(item.pphAmount || 0) > 0),
       remainingPayable: meta.remainingPayable !== undefined ? Number(meta.remainingPayable) : (item.status === 'Lunas' ? 0 : origPayable),
       paidAmount: meta.paidAmount !== undefined ? Number(meta.paidAmount) : (item.status === 'Lunas' ? origPayable : 0),
-      paymentHistory: meta.paymentHistory || item.paymentHistory || []
+      paymentHistory: meta.paymentHistory || item.paymentHistory || [],
+      items: (item.items || []).map(it => ({
+        ...it,
+        taxRate: it.taxRate !== undefined ? Number(it.taxRate) : (Number(item.ppnRate) || 0)
+      }))
     };
   });
 }

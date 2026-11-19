@@ -108,7 +108,11 @@ export default function PurchasePrintPreviewModal({ pr, vendor, coaList, onClose
                       <td className="py-2.5 px-3 text-center font-bold text-slate-800">{it.qty}</td>
                       <td className="py-2.5 px-3 text-center text-slate-600">{it.unit}</td>
                       <td className="py-2.5 px-3 text-right font-mono">{formatRupiah(it.unitPrice)}</td>
-                      <td className="py-2.5 px-3 text-center text-emerald-700 font-semibold">{it.taxRate ? `${it.taxRate}%` : '0%'}</td>
+                      <td className="py-2.5 px-3 text-center text-emerald-700 font-semibold">
+                        {it.taxRate !== undefined && it.taxRate !== null && Number(it.taxRate) > 0 
+                          ? `${it.taxRate}%` 
+                          : (pr.ppnRate && Number(pr.ppnRate) > 0 ? `${pr.ppnRate}%` : '0%')}
+                      </td>
                       <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">{formatRupiah(it.subtotal)}</td>
                     </tr>
                   ))
