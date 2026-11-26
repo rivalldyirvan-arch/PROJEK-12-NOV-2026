@@ -226,7 +226,15 @@ export function buildReversalLines(lines = []) {
 }
 
 /**
- * Hitung agregasi saldo per akun dari jurnal yang berstatus 'Posted' (Single Source of Truth Buku Besar).
+ * Status jurnal yang sah masuk ke Buku Besar & Neraca Saldo.
+ * Catatan: 'Reversed' tetap dihitung karena jurnal pembaliknya ('Posted') yang menetralkan saldonya.
+ */
+export function isEffectivePostedStatus(status) {
+  return status === 'Posted' || status === 'Reversed';
+}
+
+/**
+ * Hitung agregasi saldo per akun dari jurnal yang sudah diposting (Single Source of Truth Buku Besar).
  */
 export function calculateBalancesFromJournals(coaList = [], journalEntries = []) {
   const balanceMap = {};
@@ -235,7 +243,7 @@ export function calculateBalancesFromJournals(coaList = [], journalEntries = [])
   });
 
   journalEntries
-    .filter(j => j.status === 'Posted')
+    .filter(j => isEffectivePostedStatus(j.status))
     .forEach(j => {
       (j.lines || []).forEach(line => {
         const code = line.accountCode;
@@ -255,5 +263,186 @@ export function calculateBalancesFromJournals(coaList = [], journalEntries = [])
   });
 
   return balanceMap;
+}
+
+/**
+ * Hitung Buku Besar (General Ledger) untuk satu akun pada rentang tanggal & filter tertentu.
+ */
+export function buildGeneralLedger({
+  account,
+  journalEntries = [],
+  startDate = '',
+  endDate = '',
+  journalType = 'Semua',
+  department = 'Semua',
+  searchQuery = ''
+}) {
+  if (!account) return null;
+
+  const isDebitNormal = account.normalBalance === 'Debit';
+  const baseOpening = Number(account.balance) || 0;
+
+  // Semua baris efektif untuk akun ini, diurutkan kronologis (tanggal naik)
+  const allAccountEntries = [];
+  journalEntries
+    .filter(j => isEffectivePostedStatus(j.status))
+    .forEach(j => {
+      (j.lines || []).forEach((line, lineIdx) => {
+        if (line.accountCode === account.code) {
+          allAccountEntries.push({
+            id: `${j.id}-${lineIdx}`,
+            journalId: j.id,
+            entryNumber: j.entryNumber,
+            entryDate: j.entryDate,
+            journalType: j.journalType || 'Jurnal Umum',
+            sourceModule: j.sourceModule || 'Manual',
+            referenceNo: j.referenceNo || '-',
+            department: j.department || '-',
+            description: line.description || j.description,
+            debit: Number(line.debit) || 0,
+            credit: Number(line.credit) || 0,
+            status: j.status,
+            journal: j
+          });
+        }
+      });
+    });
+
+  allAccountEntries.sort((a, b) => {
+    if (a.entryDate !== b.entryDate) return a.entryDate.localeCompare(b.entryDate);
+    return (a.entryNumber || '').localeCompare(b.entryNumber || '');
+  });
+
+  // Hitung Saldo Awal sebelum startDate
+  let openingBalance = baseOpening;
+  allAccountEntries.forEach(item => {
+    if (startDate && item.entryDate < startDate) {
+      openingBalance += isDebitNormal ? (item.debit - item.credit) : (item.credit - item.debit);
+    }
+  });
+
+  // Filter transaksi dalam periode
+  const q = (searchQuery || '').trim().toLowerCase();
+  const periodRows = [];
+  let runningBalance = openingBalance;
+  let totalPeriodDebit = 0;
+  let totalPeriodCredit = 0;
+
+  allAccountEntries.forEach(item => {
+    if (startDate && item.entryDate < startDate) return;
+    if (endDate && item.entryDate > endDate) return;
+
+    // Update running balance berdasarkan seluruh mutasi sah periode
+    runningBalance += isDebitNormal ? (item.debit - item.credit) : (item.credit - item.debit);
+
+    const matchType = journalType === 'Semua' || item.journalType === journalType;
+    const matchDept = department === 'Semua' || item.department === department;
+    const matchQ = !q ||
+      (item.entryNumber || '').toLowerCase().includes(q) ||
+      (item.description || '').toLowerCase().includes(q) ||
+      (item.referenceNo || '').toLowerCase().includes(q);
+
+    if (matchType && matchDept && matchQ) {
+      totalPeriodDebit += item.debit;
+      totalPeriodCredit += item.credit;
+      periodRows.push({
+        ...item,
+        runningBalance
+      });
+    }
+  });
+
+  return {
+    account,
+    openingBalance,
+    rows: periodRows,
+    totalPeriodDebit,
+    totalPeriodCredit,
+    closingBalance: runningBalance
+  };
+}
+
+/**
+ * Hitung Neraca Saldo (Trial Balance) 8 Kolom untuk rentang tanggal tertentu.
+ */
+export function buildTrialBalance({ coaList = [], journalEntries = [], startDate = '', endDate = '' }) {
+  const effectiveJournals = journalEntries.filter(j => isEffectivePostedStatus(j.status));
+
+  // Deteksi jurnal tidak seimbang (untuk validasi & pemblokiran closing)
+  const unbalancedJournals = effectiveJournals.filter(j => {
+    const d = (j.lines || []).reduce((s, l) => s + (Number(l.debit) || 0), 0);
+    const c = (j.lines || []).reduce((s, l) => s + (Number(l.credit) || 0), 0);
+    return Math.abs(d - c) >= 0.01;
+  });
+
+  const rows = coaList.map(acc => {
+    const isDebitNormal = acc.normalBalance === 'Debit';
+    const masterBal = Number(acc.balance) || 0;
+
+    let openNet = isDebitNormal ? masterBal : -masterBal; // positif = Debit, negatif = Kredit
+    let mutDebit = 0;
+    let mutCredit = 0;
+
+    effectiveJournals.forEach(j => {
+      const inBefore = startDate && j.entryDate < startDate;
+      const inRange = (!startDate || j.entryDate >= startDate) && (!endDate || j.entryDate <= endDate);
+
+      (j.lines || []).forEach(line => {
+        if (line.accountCode !== acc.code) return;
+        const d = Number(line.debit) || 0;
+        const c = Number(line.credit) || 0;
+        if (inBefore) {
+          openNet += (d - c);
+        } else if (inRange) {
+          mutDebit += d;
+          mutCredit += c;
+        }
+      });
+    });
+
+    const openDebit = openNet > 0 ? openNet : 0;
+    const openCredit = openNet < 0 ? Math.abs(openNet) : 0;
+
+    const endNet = openNet + (mutDebit - mutCredit);
+    const endDebit = endNet > 0 ? endNet : 0;
+    const endCredit = endNet < 0 ? Math.abs(endNet) : 0;
+
+    return {
+      code: acc.code,
+      name: acc.name,
+      category: acc.category,
+      normalBalance: acc.normalBalance,
+      openDebit,
+      openCredit,
+      mutDebit,
+      mutCredit,
+      endDebit,
+      endCredit,
+      hasActivity: openDebit > 0 || openCredit > 0 || mutDebit > 0 || mutCredit > 0
+    };
+  });
+
+  const totals = rows.reduce((t, r) => ({
+    openDebit: t.openDebit + r.openDebit,
+    openCredit: t.openCredit + r.openCredit,
+    mutDebit: t.mutDebit + r.mutDebit,
+    mutCredit: t.mutCredit + r.mutCredit,
+    endDebit: t.endDebit + r.endDebit,
+    endCredit: t.endCredit + r.endCredit
+  }), { openDebit: 0, openCredit: 0, mutDebit: 0, mutCredit: 0, endDebit: 0, endCredit: 0 });
+
+  const isBalanced =
+    Math.abs(totals.openDebit - totals.openCredit) < 0.01 &&
+    Math.abs(totals.mutDebit - totals.mutCredit) < 0.01 &&
+    Math.abs(totals.endDebit - totals.endCredit) < 0.01 &&
+    unbalancedJournals.length === 0;
+
+  return {
+    rows,
+    totals,
+    isBalanced,
+    diffEnd: Math.abs(totals.endDebit - totals.endCredit),
+    unbalancedJournals
+  };
 }
 

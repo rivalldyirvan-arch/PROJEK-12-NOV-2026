@@ -13,6 +13,8 @@ import UserModule from './pages/UserModule';
 import AssetModule from './pages/AssetModule';
 import ProductModule from './pages/ProductModule';
 import JournalModule from './pages/JournalModule';
+import GeneralLedgerModule from './pages/GeneralLedgerModule';
+import TrialBalanceModule from './pages/TrialBalanceModule';
 import LoginPage from './pages/LoginPage';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { 
@@ -41,6 +43,7 @@ function MainAppContent() {
   const [isSupabaseActive, setIsSupabaseActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
+  const [ledgerDrillDown, setLedgerDrillDown] = useState({ accountCode: '', startDate: '', endDate: '' });
 
   // Core Data Lists
   const [coaList, setCoaList] = useState([]);
@@ -208,6 +211,27 @@ function MainAppContent() {
                   auditLogs={auditLogs}
                   onRefresh={loadData}
                   showToast={showToast}
+                />
+              )}
+
+              {activeTab === 'ledger' && (
+                <GeneralLedgerModule 
+                  coaList={coaList}
+                  journalEntries={journalEntriesList}
+                  initialAccountCode={ledgerDrillDown.accountCode}
+                  initialStartDate={ledgerDrillDown.startDate}
+                  initialEndDate={ledgerDrillDown.endDate}
+                />
+              )}
+
+              {activeTab === 'trial-balance' && (
+                <TrialBalanceModule 
+                  coaList={coaList}
+                  journalEntries={journalEntriesList}
+                  onDrillDownLedger={(accountCode, startDate, endDate) => {
+                    setLedgerDrillDown({ accountCode, startDate, endDate });
+                    setActiveTab('ledger');
+                  }}
                 />
               )}
 

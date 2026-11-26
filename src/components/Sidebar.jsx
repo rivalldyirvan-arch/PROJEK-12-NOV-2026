@@ -13,7 +13,9 @@ import {
   Shield,
   Building2,
   Package,
-  BookOpen
+  BookOpen,
+  Library,
+  Scale
 } from 'lucide-react';
 import { useAuth } from '../lib/authContext';
 
@@ -40,6 +42,18 @@ export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, 
       icon: BookOpen,
       badge: stats?.journalCount || 0,
       badgeColor: 'bg-indigo-100 text-indigo-800'
+    },
+    { 
+      id: 'ledger', 
+      label: 'Buku Besar (GL)', 
+      sub: 'Mutasi & Saldo Berjalan',
+      icon: Library
+    },
+    { 
+      id: 'trial-balance', 
+      label: 'Neraca Saldo', 
+      sub: 'Validasi Keseimbangan',
+      icon: Scale
     },
     { 
       id: 'vendors', 
