@@ -19,6 +19,7 @@ import DocumentArchiveModule from './pages/DocumentArchiveModule';
 import SalesModule from './pages/SalesModule';
 import ExpenseCashBankModule from './pages/ExpenseCashBankModule';
 import AdjustingClosingModule from './pages/AdjustingClosingModule';
+import FinancialStatementsModule from './pages/FinancialStatementsModule';
 import LoginPage from './pages/LoginPage';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { 
@@ -268,6 +269,14 @@ function MainAppContent() {
                   journalSequences={journalSequences}
                   coaMappings={coaMappings}
                   onRefresh={loadData}
+                  showToast={showToast}
+                />
+              )}
+
+              {activeTab === 'financial-statements' && (
+                <FinancialStatementsModule
+                  coaList={coaList}
+                  journalEntries={journalEntriesList}
                   showToast={showToast}
                 />
               )}

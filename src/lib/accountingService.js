@@ -670,3 +670,571 @@ export function buildPostClosingTrialBalance({ coaList = [], journalEntries = []
   };
 }
 
+
+// ============================================================
+//  PHASE 5 — LAPORAN KEUANGAN (FINANCIAL STATEMENTS)
+// ============================================================
+
+/**
+ * Hitung Net Balance setiap akun dari daftar jurnal yang sudah diposting.
+ * Net = masterBalance (saldo awal) + agregasi debit-kredit dari jurnal.
+ * @param {object} acc - COA account object
+ * @param {Array}  effectiveJournals - jurnal dengan status Posted/Reversed
+ * @param {string} upToDate - 'YYYY-MM-DD', batas tanggal (inklusive)
+ * @returns {number} net balance (positif=debit normal, negatif=kredit normal untuk akun kredit-normal)
+ */
+function getAccountNetBalance(acc, effectiveJournals, upToDate = '') {
+  const isDebitNormal = acc.normalBalance === 'Debit';
+  const masterBal = Number(acc.balance) || 0;
+  let net = isDebitNormal ? masterBal : -masterBal;
+
+  effectiveJournals.forEach(j => {
+    if (upToDate && j.entryDate > upToDate) return;
+    (j.lines || []).forEach(l => {
+      if (l.accountCode !== acc.code) return;
+      net += (Number(l.debit) || 0) - (Number(l.credit) || 0);
+    });
+  });
+  return net; // positif = debit, negatif = kredit
+}
+
+/**
+ * Mengambil transaksi jurnal hanya dalam rentang periode startDate-endDate.
+ * Berbeda dengan getAccountNetBalance yang mengakumulasi dari awal.
+ */
+function getPeriodBalance(accCode, effectiveJournals, startDate, endDate) {
+  let debit = 0;
+  let credit = 0;
+  effectiveJournals.forEach(j => {
+    if (startDate && j.entryDate < startDate) return;
+    if (endDate && j.entryDate > endDate) return;
+    (j.lines || []).forEach(l => {
+      if (l.accountCode !== accCode) return;
+      debit += Number(l.debit) || 0;
+      credit += Number(l.credit) || 0;
+    });
+  });
+  return { debit, credit, net: debit - credit };
+}
+
+/**
+ * Hitung rata-rata saldo dua titik waktu untuk rasio aktivitas.
+ */
+function averageBalance(start, end) {
+  return (start + end) / 2;
+}
+
+// ----------------------------------------------------------------
+// A. LAPORAN LABA RUGI (INCOME STATEMENT)
+// ----------------------------------------------------------------
+/**
+ * Susun Laporan Laba Rugi berdasarkan COA dan jurnal.
+ * @param {object} param
+ * @param {Array}  param.coaList
+ * @param {Array}  param.journalEntries
+ * @param {string} param.startDate  YYYY-MM-DD
+ * @param {string} param.endDate    YYYY-MM-DD
+ * @returns {object} incomeStatement
+ */
+export function buildIncomeStatement({ coaList = [], journalEntries = [], startDate = '', endDate = '' }) {
+  const effective = journalEntries.filter(j => isEffectivePostedStatus(j.status));
+
+  // Ambil semua akun dan hitung net movement selama periode (bukan kumulatif)
+  const rows = coaList.map(acc => {
+    const pb = getPeriodBalance(acc.code, effective, startDate, endDate);
+    // Untuk akun kredit-normal (Revenue, Other Revenue): nilai positif = kredit lebih besar → pendapatan
+    // Untuk akun debit-normal (COGS, Expense, Other Expense): nilai positif = debit lebih besar → beban
+    const isDebitNormal = acc.normalBalance === 'Debit';
+    const amount = isDebitNormal ? (pb.debit - pb.credit) : (pb.credit - pb.debit);
+    return {
+      code: acc.code,
+      name: acc.name,
+      category: acc.category,
+      subCategory: acc.subCategory || '',
+      normalBalance: acc.normalBalance,
+      amount, // positif selalu berarti "angka yang bermakna" sesuai sifat akun
+      debit: pb.debit,
+      credit: pb.credit
+    };
+  });
+
+  // Kelompok Revenue (Pendapatan Usaha)
+  const revenueRows = rows.filter(r => r.category === 'Revenue');
+  const totalRevenue = revenueRows.reduce((s, r) => s + r.amount, 0);
+
+  // Harga Pokok Penjualan (COGS / HPP)
+  const cogsRows = rows.filter(r => r.category === 'COGS');
+  const totalCOGS = cogsRows.reduce((s, r) => s + r.amount, 0);
+
+  // Laba Kotor
+  const grossProfit = totalRevenue - totalCOGS;
+
+  // Beban Operasional
+  const expenseRows = rows.filter(r => r.category === 'Expense');
+  const totalExpense = expenseRows.reduce((s, r) => s + r.amount, 0);
+
+  // Laba Operasional (EBIT)
+  const operatingProfit = grossProfit - totalExpense;
+
+  // Pendapatan Lain-lain
+  const otherRevenueRows = rows.filter(r => r.category === 'Other Revenue');
+  const totalOtherRevenue = otherRevenueRows.reduce((s, r) => s + r.amount, 0);
+
+  // Beban Lain-lain
+  const otherExpenseRows = rows.filter(r => r.category === 'Other Expense');
+  const totalOtherExpense = otherExpenseRows.reduce((s, r) => s + r.amount, 0);
+
+  // Laba Sebelum Pajak (EBT)
+  const profitBeforeTax = operatingProfit + totalOtherRevenue - totalOtherExpense;
+
+  // Pajak Penghasilan (cari akun pajak di Other Expense atau dari kode khusus)
+  const taxRows = rows.filter(r =>
+    r.category === 'Other Expense' &&
+    (r.name.toLowerCase().includes('pajak penghasilan') ||
+      r.name.toLowerCase().includes('income tax') ||
+      r.code === '8201')
+  );
+  const totalTax = taxRows.reduce((s, r) => s + r.amount, 0);
+
+  // Laba Bersih
+  const netProfit = profitBeforeTax - totalTax;
+
+  return {
+    startDate,
+    endDate,
+    revenueRows,
+    totalRevenue,
+    cogsRows,
+    totalCOGS,
+    grossProfit,
+    grossProfitMargin: totalRevenue !== 0 ? (grossProfit / totalRevenue) * 100 : 0,
+    expenseRows,
+    totalExpense,
+    operatingProfit,
+    operatingProfitMargin: totalRevenue !== 0 ? (operatingProfit / totalRevenue) * 100 : 0,
+    otherRevenueRows,
+    totalOtherRevenue,
+    otherExpenseRows,
+    totalOtherExpense,
+    profitBeforeTax,
+    taxRows,
+    totalTax,
+    netProfit,
+    netProfitMargin: totalRevenue !== 0 ? (netProfit / totalRevenue) * 100 : 0,
+    isProfit: netProfit >= 0
+  };
+}
+
+// ----------------------------------------------------------------
+// B. NERACA / BALANCE SHEET
+// ----------------------------------------------------------------
+/**
+ * Susun Neraca per tanggal tertentu.
+ * @param {object} param
+ * @param {Array}  param.coaList
+ * @param {Array}  param.journalEntries
+ * @param {string} param.asOfDate  YYYY-MM-DD
+ * @returns {object} balanceSheet
+ */
+export function buildBalanceSheet({ coaList = [], journalEntries = [], asOfDate = '' }) {
+  const effective = journalEntries.filter(j => isEffectivePostedStatus(j.status));
+
+  const rows = coaList.map(acc => {
+    const net = getAccountNetBalance(acc, effective, asOfDate);
+    // net: positif = sesuai sifat normal (asset=debit, liab/eq=credit dalam nilai absolut)
+    // Untuk asset (debit-normal): net positif = balance positif
+    // Untuk liab/equity (credit-normal): net negatif = balance positif (saldo kredit)
+    const isDebitNormal = acc.normalBalance === 'Debit';
+    const balance = isDebitNormal ? Math.max(net, 0) : Math.max(-net, 0);
+
+    return {
+      code: acc.code,
+      name: acc.name,
+      category: acc.category,
+      subCategory: acc.subCategory || '',
+      normalBalance: acc.normalBalance,
+      balance,
+      rawNet: net
+    };
+  });
+
+  // ASET
+  const assetRows = rows.filter(r => r.category === 'Asset');
+  // Sub-kelompok aset: Lancar (kode 11xx) vs Tetap (kode 12xx+)
+  const currentAssetRows = assetRows.filter(r => r.code.startsWith('11') || r.subCategory === 'Lancar' || r.name.toLowerCase().includes('lancar'));
+  const fixedAssetRows = assetRows.filter(r => !currentAssetRows.includes(r));
+  const totalCurrentAssets = currentAssetRows.reduce((s, r) => s + r.balance, 0);
+  const totalFixedAssets = fixedAssetRows.reduce((s, r) => s + r.balance, 0);
+  const totalAssets = assetRows.reduce((s, r) => s + r.balance, 0);
+
+  // KEWAJIBAN
+  const liabilityRows = rows.filter(r => r.category === 'Liability');
+  const currentLiabilityRows = liabilityRows.filter(r => r.code.startsWith('21') || r.subCategory === 'Jangka Pendek');
+  const longTermLiabilityRows = liabilityRows.filter(r => !currentLiabilityRows.includes(r));
+  const totalCurrentLiabilities = currentLiabilityRows.reduce((s, r) => s + r.balance, 0);
+  const totalLongTermLiabilities = longTermLiabilityRows.reduce((s, r) => s + r.balance, 0);
+  const totalLiabilities = liabilityRows.reduce((s, r) => s + r.balance, 0);
+
+  // EKUITAS
+  const equityRows = rows.filter(r => r.category === 'Equity');
+  const totalEquity = equityRows.reduce((s, r) => s + r.balance, 0);
+
+  // Validasi: Aset = Kewajiban + Ekuitas
+  const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
+  const isBalanced = Math.abs(totalAssets - totalLiabilitiesAndEquity) < 1;
+
+  return {
+    asOfDate,
+    currentAssetRows,
+    fixedAssetRows,
+    totalCurrentAssets,
+    totalFixedAssets,
+    totalAssets,
+    currentLiabilityRows,
+    longTermLiabilityRows,
+    totalCurrentLiabilities,
+    totalLongTermLiabilities,
+    totalLiabilities,
+    equityRows,
+    totalEquity,
+    totalLiabilitiesAndEquity,
+    isBalanced,
+    difference: totalAssets - totalLiabilitiesAndEquity
+  };
+}
+
+// ----------------------------------------------------------------
+// C. LAPORAN PERUBAHAN EKUITAS
+// ----------------------------------------------------------------
+/**
+ * Susun Laporan Perubahan Ekuitas.
+ */
+export function buildEquityStatement({ coaList = [], journalEntries = [], startDate = '', endDate = '' }) {
+  const effective = journalEntries.filter(j => isEffectivePostedStatus(j.status));
+
+  // Saldo awal ekuitas (sebelum startDate)
+  const equityAccounts = coaList.filter(a => a.category === 'Equity');
+
+  const openingEquityRows = equityAccounts.map(acc => {
+    const net = getAccountNetBalance(acc, effective, startDate
+      ? new Date(new Date(startDate).getTime() - 86400000).toISOString().slice(0, 10)
+      : '');
+    return { code: acc.code, name: acc.name, balance: Math.max(-net, 0) };
+  });
+  const openingEquity = openingEquityRows.reduce((s, r) => s + r.balance, 0);
+
+  // Laba/Rugi periode dari Income Statement
+  const is = buildIncomeStatement({ coaList, journalEntries, startDate, endDate });
+  const netProfit = is.netProfit;
+
+  // Prive/Dividen: cari akun di Equity dengan nama mengandung prive/dividen
+  const priveAccounts = equityAccounts.filter(a =>
+    a.name.toLowerCase().includes('prive') ||
+    a.name.toLowerCase().includes('dividen') ||
+    a.name.toLowerCase().includes('drawing')
+  );
+  let totalPrive = 0;
+  priveAccounts.forEach(acc => {
+    const pb = getPeriodBalance(acc.code, effective, startDate, endDate);
+    totalPrive += pb.debit - pb.credit; // prive mengurangi ekuitas
+  });
+
+  // Modal akhir
+  const closingEquity = openingEquity + netProfit - totalPrive;
+
+  return {
+    startDate,
+    endDate,
+    openingEquityRows,
+    openingEquity,
+    netProfit,
+    isProfit: netProfit >= 0,
+    priveAccounts,
+    totalPrive,
+    closingEquity,
+    equityRows: equityAccounts.map(acc => {
+      const net = getAccountNetBalance(acc, effective, endDate);
+      return { code: acc.code, name: acc.name, balance: Math.max(-net, 0) };
+    })
+  };
+}
+
+// ----------------------------------------------------------------
+// D. LAPORAN ARUS KAS (Metode Tidak Langsung / Indirect Method)
+// ----------------------------------------------------------------
+/**
+ * Susun Laporan Arus Kas.
+ */
+export function buildCashFlowStatement({
+  coaList = [],
+  journalEntries = [],
+  startDate = '',
+  endDate = '',
+  priorEndDate = '' // akhir periode sebelumnya untuk hitung perubahan
+}) {
+  const effective = journalEntries.filter(j => isEffectivePostedStatus(j.status));
+
+  // Helper: saldo akhir suatu tanggal
+  const endBal = (acc, dt) => {
+    const net = getAccountNetBalance(acc, effective, dt);
+    return acc.normalBalance === 'Debit' ? Math.max(net, 0) : Math.max(-net, 0);
+  };
+
+  // Laba Bersih
+  const is = buildIncomeStatement({ coaList, journalEntries, startDate, endDate });
+  const netProfit = is.netProfit;
+
+  // --- AKTIVITAS OPERASI ---
+  // Penyusutan (tambah balik non-kas)
+  const depAccounts = coaList.filter(a =>
+    a.name.toLowerCase().includes('penyusutan') ||
+    a.name.toLowerCase().includes('amortisasi') ||
+    a.name.toLowerCase().includes('depreciation')
+  );
+  let totalDepreciation = 0;
+  depAccounts.forEach(acc => {
+    const pb = getPeriodBalance(acc.code, effective, startDate, endDate);
+    totalDepreciation += Math.max(pb.debit - pb.credit, 0);
+  });
+
+  // Perubahan modal kerja
+  const arAccounts = coaList.filter(a => a.category === 'Asset' && (a.name.toLowerCase().includes('piutang') || a.code.startsWith('1120')));
+  const invAccounts = coaList.filter(a => a.category === 'Asset' && (a.name.toLowerCase().includes('persediaan') || a.code.startsWith('1130')));
+  const prepaidAccounts = coaList.filter(a => a.category === 'Asset' && (a.name.toLowerCase().includes('dibayar dimuka') || a.name.toLowerCase().includes('prepaid')));
+  const apAccounts = coaList.filter(a => a.category === 'Liability' && (a.name.toLowerCase().includes('utang usaha') || a.code.startsWith('2101')));
+  const accruedAccounts = coaList.filter(a => a.category === 'Liability' && (a.name.toLowerCase().includes('akrual') || a.name.toLowerCase().includes('terutang') || a.code.startsWith('2102')));
+
+  const calcChange = (accounts, priorDt, curDt, isAsset) => {
+    let priorSum = 0;
+    let curSum = 0;
+    accounts.forEach(acc => {
+      priorSum += endBal(acc, priorDt);
+      curSum += endBal(acc, curDt);
+    });
+    const change = curSum - priorSum;
+    // Aset meningkat = kas berkurang (negatif), Liab meningkat = kas bertambah (positif)
+    return isAsset ? -change : change;
+  };
+
+  const prior = priorEndDate || (startDate ? new Date(new Date(startDate).getTime() - 86400000).toISOString().slice(0, 10) : '');
+  const changeAR = calcChange(arAccounts, prior, endDate, true);
+  const changeInventory = calcChange(invAccounts, prior, endDate, true);
+  const changePrepaid = calcChange(prepaidAccounts, prior, endDate, true);
+  const changeAP = calcChange(apAccounts, prior, endDate, false);
+  const changeAccrued = calcChange(accruedAccounts, prior, endDate, false);
+
+  const operatingCashFlow = netProfit + totalDepreciation + changeAR + changeInventory + changePrepaid + changeAP + changeAccrued;
+
+  // --- AKTIVITAS INVESTASI ---
+  const fixedAssetAccounts = coaList.filter(a => a.category === 'Asset' && a.code.startsWith('12'));
+  let investingCashFlow = 0;
+  fixedAssetAccounts.forEach(acc => {
+    const pb = getPeriodBalance(acc.code, effective, startDate, endDate);
+    // Pembelian aset = arus kas negatif (debit naik)
+    investingCashFlow -= (pb.debit - pb.credit);
+  });
+
+  // --- AKTIVITAS PENDANAAN ---
+  const loanAccounts = coaList.filter(a => a.category === 'Liability' && (a.name.toLowerCase().includes('utang bank') || a.name.toLowerCase().includes('pinjaman') || a.code.startsWith('22')));
+  const capitalAccounts = coaList.filter(a => a.category === 'Equity' && (a.name.toLowerCase().includes('modal') || a.code.startsWith('31')));
+  const priveAccountsForCF = coaList.filter(a => a.category === 'Equity' && (a.name.toLowerCase().includes('prive') || a.name.toLowerCase().includes('dividen')));
+
+  let financingCashFlow = 0;
+  loanAccounts.forEach(acc => {
+    const pb = getPeriodBalance(acc.code, effective, startDate, endDate);
+    financingCashFlow += pb.credit - pb.debit; // utang naik = kas masuk
+  });
+  capitalAccounts.forEach(acc => {
+    const pb = getPeriodBalance(acc.code, effective, startDate, endDate);
+    financingCashFlow += pb.credit - pb.debit;
+  });
+  priveAccountsForCF.forEach(acc => {
+    const pb = getPeriodBalance(acc.code, effective, startDate, endDate);
+    financingCashFlow -= pb.debit - pb.credit;
+  });
+
+  // Perubahan kas bersih
+  const netCashChange = operatingCashFlow + investingCashFlow + financingCashFlow;
+
+  // Saldo kas
+  const cashAccounts = coaList.filter(a => a.category === 'Asset' && (a.code.startsWith('1101') || a.code.startsWith('1102') || a.name.toLowerCase().includes('kas') || a.name.toLowerCase().includes('bank')));
+  let openingCash = 0;
+  let closingCash = 0;
+  cashAccounts.forEach(acc => {
+    openingCash += endBal(acc, prior);
+    closingCash += endBal(acc, endDate);
+  });
+
+  return {
+    startDate,
+    endDate,
+    netProfit,
+    // Operasi
+    totalDepreciation,
+    changeAR,
+    changeInventory,
+    changePrepaid,
+    changeAP,
+    changeAccrued,
+    operatingCashFlow,
+    // Investasi
+    investingCashFlow,
+    fixedAssetAccounts: fixedAssetAccounts.map(acc => {
+      const pb = getPeriodBalance(acc.code, effective, startDate, endDate);
+      return { code: acc.code, name: acc.name, amount: -(pb.debit - pb.credit) };
+    }),
+    // Pendanaan
+    financingCashFlow,
+    // Total
+    netCashChange,
+    openingCash,
+    closingCash,
+    reconciled: Math.abs((openingCash + netCashChange) - closingCash) < 1
+  };
+}
+
+// ----------------------------------------------------------------
+// E. RASIO KEUANGAN
+// ----------------------------------------------------------------
+/**
+ * Hitung seluruh rasio keuangan dari data laporan keuangan.
+ * Semua kalkulasi berbasis data aktual dari jurnal — tidak ada hardcode.
+ */
+export function calculateFinancialRatios({
+  coaList = [],
+  journalEntries = [],
+  startDate = '',
+  endDate = '',
+  priorStartDate = '',
+  priorEndDate = ''
+}) {
+  const effective = journalEntries.filter(j => isEffectivePostedStatus(j.status));
+
+  // Periode berjalan
+  const bs = buildBalanceSheet({ coaList, journalEntries, asOfDate: endDate });
+  const is = buildIncomeStatement({ coaList, journalEntries, startDate, endDate });
+
+  // Periode sebelumnya (untuk rata-rata)
+  const bsPrior = priorEndDate
+    ? buildBalanceSheet({ coaList, journalEntries, asOfDate: priorEndDate })
+    : bs;
+
+  const safe = (num, den) => (den !== 0 ? num / den : null);
+  const pct = (num, den) => (den !== 0 ? (num / den) * 100 : null);
+
+  // Komponen neraca
+  const { totalCurrentAssets, totalCurrentLiabilities, totalAssets, totalLiabilities, totalEquity } = bs;
+  const persediaanAcc = coaList.filter(a => a.name.toLowerCase().includes('persediaan') || a.code.startsWith('1130'));
+  const prepaidAcc = coaList.filter(a => a.name.toLowerCase().includes('dibayar dimuka') || a.name.toLowerCase().includes('prepaid'));
+  const kasAcc = coaList.filter(a => a.code.startsWith('1101') || a.code.startsWith('1102') || a.name.toLowerCase().includes('kas'));
+
+  const endBal = (accs, dt) => accs.reduce((s, acc) => {
+    const net = getAccountNetBalance(acc, effective, dt);
+    return s + (acc.normalBalance === 'Debit' ? Math.max(net, 0) : Math.max(-net, 0));
+  }, 0);
+
+  const inventory = endBal(persediaanAcc, endDate);
+  const inventoryPrior = endBal(persediaanAcc, priorEndDate || endDate);
+  const prepaid = endBal(prepaidAcc, endDate);
+  const cash = endBal(kasAcc, endDate);
+
+  const ar = endBal(coaList.filter(a => a.name.toLowerCase().includes('piutang') || a.code.startsWith('112')), endDate);
+  const arPrior = endBal(coaList.filter(a => a.name.toLowerCase().includes('piutang') || a.code.startsWith('112')), priorEndDate || endDate);
+  const ap = endBal(coaList.filter(a => a.name.toLowerCase().includes('utang usaha') || a.code.startsWith('2101')), endDate);
+  const apPrior = endBal(coaList.filter(a => a.name.toLowerCase().includes('utang usaha') || a.code.startsWith('2101')), priorEndDate || endDate);
+
+  // Rata-rata aset & ekuitas
+  const avgTotalAssets = averageBalance(bsPrior.totalAssets, totalAssets);
+  const avgEquity = averageBalance(bsPrior.totalEquity, totalEquity);
+  const avgAR = averageBalance(arPrior, ar);
+  const avgAP = averageBalance(apPrior, ap);
+  const avgInventory = averageBalance(inventoryPrior, inventory);
+
+  // Periode hari
+  const days = startDate && endDate
+    ? Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1)
+    : 365;
+
+  // Beban bunga
+  const interestAccounts = coaList.filter(a =>
+    a.name.toLowerCase().includes('bunga') ||
+    a.code === '8102' ||
+    a.name.toLowerCase().includes('interest')
+  );
+  let interestExpense = 0;
+  interestAccounts.forEach(acc => {
+    const pb = getPeriodBalance(acc.code, effective, startDate, endDate);
+    interestExpense += pb.debit - pb.credit;
+  });
+
+  // ---- LIKUIDITAS ----
+  const currentRatio = safe(totalCurrentAssets, totalCurrentLiabilities);
+  const quickRatio = safe(totalCurrentAssets - inventory - prepaid, totalCurrentLiabilities);
+  const cashRatio = safe(cash, totalCurrentLiabilities);
+
+  // ---- SOLVABILITAS ----
+  const debtToAsset = safe(totalLiabilities, totalAssets);
+  const debtToEquity = safe(totalLiabilities, totalEquity);
+  const ebit = is.operatingProfit + (interestExpense > 0 ? interestExpense : 0);
+  const interestCoverage = interestExpense > 0 ? safe(ebit, interestExpense) : null;
+
+  // ---- PROFITABILITAS ----
+  const grossProfitMargin = pct(is.grossProfit, is.totalRevenue);
+  const operatingProfitMargin = pct(is.operatingProfit, is.totalRevenue);
+  const netProfitMargin = pct(is.netProfit, is.totalRevenue);
+  const roa = avgTotalAssets > 0 ? pct(is.netProfit, avgTotalAssets) : null;
+  const roe = avgEquity > 0 ? pct(is.netProfit, avgEquity) : null;
+
+  // ---- AKTIVITAS ----
+  const inventoryTurnover = avgInventory > 0 ? safe(is.totalCOGS, avgInventory) : null;
+  const daysInventoryOutstanding = inventoryTurnover ? days / inventoryTurnover : null;
+  const arTurnover = avgAR > 0 ? safe(is.totalRevenue, avgAR) : null;
+  const daysSOOutstanding = arTurnover ? days / arTurnover : null;
+  // Pembelian = HPP + Persediaan Akhir - Persediaan Awal
+  const purchases = is.totalCOGS + inventory - inventoryPrior;
+  const apTurnover = avgAP > 0 ? safe(purchases, avgAP) : null;
+  const daysPayableOutstanding = apTurnover ? days / apTurnover : null;
+  const assetTurnover = avgTotalAssets > 0 ? safe(is.totalRevenue, avgTotalAssets) : null;
+  const cashConversionCycle = (daysSOOutstanding !== null && daysInventoryOutstanding !== null && daysPayableOutstanding !== null)
+    ? daysSOOutstanding + daysInventoryOutstanding - daysPayableOutstanding
+    : null;
+
+  return {
+    period: { startDate, endDate, days },
+    // Input data
+    is,
+    bs,
+    // Likuiditas
+    currentRatio,
+    quickRatio,
+    cashRatio,
+    // Solvabilitas
+    debtToAsset,
+    debtToEquity,
+    interestExpense,
+    ebit,
+    interestCoverage,
+    // Profitabilitas
+    grossProfitMargin,
+    operatingProfitMargin,
+    netProfitMargin,
+    roa,
+    roe,
+    // Aktivitas
+    inventoryTurnover,
+    daysInventoryOutstanding,
+    arTurnover,
+    daysSOOutstanding,
+    apTurnover,
+    daysPayableOutstanding,
+    assetTurnover,
+    cashConversionCycle,
+    // Pendukung
+    inventory,
+    cash,
+    ar,
+    ap,
+    avgTotalAssets,
+    avgEquity
+  };
+}

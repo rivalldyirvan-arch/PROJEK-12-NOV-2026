@@ -19,7 +19,8 @@ import {
   FileArchive,
   TrendingUp,
   Wallet,
-  SlidersHorizontal
+  SlidersHorizontal,
+  BarChart3
 } from 'lucide-react';
 import { useAuth } from '../lib/authContext';
 
@@ -64,6 +65,13 @@ export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, 
       label: 'Penyesuaian & Closing', 
       sub: 'Adjusted TB & Penutupan',
       icon: SlidersHorizontal
+    },
+    { 
+      id: 'financial-statements', 
+      label: 'Laporan Keuangan', 
+      sub: 'L/R · Neraca · Arus Kas · Rasio',
+      icon: BarChart3,
+      badgeColor: 'bg-purple-100 text-purple-800'
     },
     { 
       id: 'vendors', 
