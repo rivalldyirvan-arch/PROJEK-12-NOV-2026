@@ -446,3 +446,227 @@ export function buildTrialBalance({ coaList = [], journalEntries = [], startDate
   };
 }
 
+export const ADJUSTMENT_TYPES = [
+  { key: 'accrued_expense', label: 'Beban yang Masih Harus Dibayar (Accrued Expenses)', defaultDebit: '6106', defaultCredit: '2102' },
+  { key: 'accrued_revenue', label: 'Pendapatan yang Masih Harus Diterima (Accrued Revenue)', defaultDebit: '1120', defaultCredit: '4101' },
+  { key: 'prepaid_expense', label: 'Beban Dibayar di Muka (Prepaid Expenses)', defaultDebit: '6102', defaultCredit: '1140' },
+  { key: 'unearned_revenue', label: 'Pendapatan Diterima di Muka (Unearned Revenue)', defaultDebit: '2101', defaultCredit: '4102' },
+  { key: 'depreciation', label: 'Penyusutan Aset Tetap (Depreciation)', defaultDebit: '6107', defaultCredit: '1201' },
+  { key: 'amortization', label: 'Amortisasi Aset Takberwujud', defaultDebit: '6105', defaultCredit: '1201' },
+  { key: 'inventory_adj', label: 'Penyesuaian Persediaan', defaultDebit: '5101', defaultCredit: '1130' },
+  { key: 'bad_debt', label: 'Cadangan Kerugian Piutang', defaultDebit: '8103', defaultCredit: '1120' },
+  { key: 'other_adj', label: 'Penyesuaian Akuntansi Lainnya', defaultDebit: '6105', defaultCredit: '2101' }
+];
+
+export function isNominalCategory(acc) {
+  return ['Revenue', 'COGS', 'Expense', 'Other Revenue', 'Other Expense'].includes(acc.category);
+}
+
+/**
+ * Hitung Neraca Saldo Setelah Penyesuaian (Adjusted Trial Balance) 8 Kolom.
+ */
+export function buildAdjustedTrialBalance({ coaList = [], journalEntries = [], startDate = '', endDate = '' }) {
+  const effective = journalEntries.filter(j => isEffectivePostedStatus(j.status) && j.journalType !== 'Jurnal Penutup');
+
+  const rows = coaList.map(acc => {
+    const isDebitNormal = acc.normalBalance === 'Debit';
+    const masterBal = Number(acc.balance) || 0;
+    let beforeNet = isDebitNormal ? masterBal : -masterBal;
+    let adjNet = 0;
+
+    effective.forEach(j => {
+      if (endDate && j.entryDate > endDate) return;
+      const inAdj = j.journalType === 'Jurnal Penyesuaian' && (!startDate || j.entryDate >= startDate);
+
+      (j.lines || []).forEach(l => {
+        if (l.accountCode !== acc.code) return;
+        const delta = (Number(l.debit) || 0) - (Number(l.credit) || 0);
+        if (inAdj) {
+          adjNet += delta;
+        } else {
+          beforeNet += delta;
+        }
+      });
+    });
+
+    const afterNet = beforeNet + adjNet;
+    const beforeDebit = beforeNet > 0 ? beforeNet : 0;
+    const beforeCredit = beforeNet < 0 ? Math.abs(beforeNet) : 0;
+    const adjDebit = adjNet > 0 ? adjNet : 0;
+    const adjCredit = adjNet < 0 ? Math.abs(adjNet) : 0;
+    const afterDebit = afterNet > 0 ? afterNet : 0;
+    const afterCredit = afterNet < 0 ? Math.abs(afterNet) : 0;
+
+    return {
+      code: acc.code,
+      name: acc.name,
+      category: acc.category,
+      subCategory: acc.subCategory,
+      normalBalance: acc.normalBalance,
+      beforeDebit,
+      beforeCredit,
+      adjDebit,
+      adjCredit,
+      afterDebit,
+      afterCredit,
+      afterNet,
+      hasActivity: beforeDebit > 0 || beforeCredit > 0 || adjDebit > 0 || adjCredit > 0 || afterDebit > 0 || afterCredit > 0
+    };
+  });
+
+  const totals = rows.reduce((t, r) => ({
+    beforeDebit: t.beforeDebit + r.beforeDebit,
+    beforeCredit: t.beforeCredit + r.beforeCredit,
+    adjDebit: t.adjDebit + r.adjDebit,
+    adjCredit: t.adjCredit + r.adjCredit,
+    afterDebit: t.afterDebit + r.afterDebit,
+    afterCredit: t.afterCredit + r.afterCredit
+  }), { beforeDebit: 0, beforeCredit: 0, adjDebit: 0, adjCredit: 0, afterDebit: 0, afterCredit: 0 });
+
+  const isBalanced =
+    Math.abs(totals.beforeDebit - totals.beforeCredit) < 0.01 &&
+    Math.abs(totals.adjDebit - totals.adjCredit) < 0.01 &&
+    Math.abs(totals.afterDebit - totals.afterCredit) < 0.01;
+
+  return { rows, totals, isBalanced };
+}
+
+/**
+ * Buat Preview Jurnal Penutup (Closing Entries) dari Neraca Saldo Setelah Penyesuaian.
+ */
+export function generateClosingEntriesPreview({
+  coaList = [],
+  journalEntries = [],
+  startDate = '',
+  endDate = '',
+  incomeSummaryCode = '3901',
+  retainedEarningsCode = '3201'
+}) {
+  const adjTb = buildAdjustedTrialBalance({ coaList, journalEntries, startDate, endDate });
+  const getName = (code, fb) => coaList.find(c => c.code === code)?.name || fb;
+
+  const lines = [];
+  let totalRevenueClosed = 0;
+  let totalExpenseClosed = 0;
+
+  // 1. Tutup seluruh akun Pendapatan & Beban/HPP
+  adjTb.rows.forEach(r => {
+    const acc = coaList.find(c => c.code === r.code);
+    if (!acc || !isNominalCategory(acc)) return;
+    if (Math.abs(r.afterNet) < 0.01) return;
+
+    // r.afterNet > 0 artinya bersaldo Debit, < 0 artinya bersaldo Kredit
+    if (r.afterNet < 0) {
+      const amt = Math.abs(r.afterNet);
+      lines.push({
+        accountCode: r.code,
+        accountName: r.name,
+        description: `Penutupan akun ${r.name}`,
+        debit: amt,
+        credit: 0
+      });
+      totalRevenueClosed += amt;
+    } else {
+      const amt = r.afterNet;
+      lines.push({
+        accountCode: r.code,
+        accountName: r.name,
+        description: `Penutupan akun ${r.name}`,
+        debit: 0,
+        credit: amt
+      });
+      totalExpenseClosed += amt;
+    }
+  });
+
+  const netIncome = totalRevenueClosed - totalExpenseClosed;
+
+  // 2. Pindahkan Ikhtisar Laba Rugi ke Laba Ditahan
+  if (Math.abs(netIncome) >= 0.01) {
+    if (netIncome > 0) {
+      lines.push({
+        accountCode: retainedEarningsCode,
+        accountName: getName(retainedEarningsCode, 'Laba Ditahan (Retained Earnings)'),
+        description: 'Pemindahan Laba Bersih Periode ke Laba Ditahan',
+        debit: 0,
+        credit: netIncome
+      });
+    } else {
+      lines.push({
+        accountCode: retainedEarningsCode,
+        accountName: getName(retainedEarningsCode, 'Laba Ditahan (Retained Earnings)'),
+        description: 'Pemindahan Rugi Bersih Periode ke Laba Ditahan',
+        debit: Math.abs(netIncome),
+        credit: 0
+      });
+    }
+  }
+
+  // Catat ringkasan Ikhtisar Laba Rugi (opsional eksplisit: Total Pendapatan - Total Beban = netIncome, sehingga jurnal langsung seimbang!)
+  const totalDebit = lines.reduce((s, l) => s + l.debit, 0);
+  const totalCredit = lines.reduce((s, l) => s + l.credit, 0);
+
+  return {
+    lines,
+    totalRevenueClosed,
+    totalExpenseClosed,
+    netIncome,
+    totalDebit,
+    totalCredit,
+    isBalanced: Math.abs(totalDebit - totalCredit) < 0.01,
+    incomeSummaryCode,
+    retainedEarningsCode,
+    adjTbBalanced: adjTb.isBalanced
+  };
+}
+
+/**
+ * Hitung Neraca Saldo Setelah Penutupan (Post-Closing Trial Balance).
+ * Hanya akun permanen (Asset, Liability, Equity) yang bersaldo; akun nominal harus 0.
+ */
+export function buildPostClosingTrialBalance({ coaList = [], journalEntries = [], endDate = '' }) {
+  const effective = journalEntries.filter(j => isEffectivePostedStatus(j.status));
+
+  const rows = coaList.map(acc => {
+    const isDebitNormal = acc.normalBalance === 'Debit';
+    const masterBal = Number(acc.balance) || 0;
+    let net = isDebitNormal ? masterBal : -masterBal;
+
+    effective.forEach(j => {
+      if (endDate && j.entryDate > endDate) return;
+      (j.lines || []).forEach(l => {
+        if (l.accountCode !== acc.code) return;
+        net += (Number(l.debit) || 0) - (Number(l.credit) || 0);
+      });
+    });
+
+    const debit = net > 0.009 ? net : 0;
+    const credit = net < -0.009 ? Math.abs(net) : 0;
+    const isNominal = isNominalCategory(acc);
+
+    return {
+      code: acc.code,
+      name: acc.name,
+      category: acc.category,
+      isNominal,
+      debit,
+      credit,
+      hasBalance: debit > 0 || credit > 0
+    };
+  });
+
+  const permanentRows = rows.filter(r => !r.isNominal);
+  const nonZeroNominal = rows.filter(r => r.isNominal && r.hasBalance);
+
+  const totalDebit = permanentRows.reduce((s, r) => s + r.debit, 0);
+  const totalCredit = permanentRows.reduce((s, r) => s + r.credit, 0);
+
+  return {
+    rows: permanentRows,
+    nonZeroNominal,
+    totalDebit,
+    totalCredit,
+    isBalanced: Math.abs(totalDebit - totalCredit) < 0.01 && nonZeroNominal.length === 0
+  };
+}
+

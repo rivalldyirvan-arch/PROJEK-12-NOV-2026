@@ -523,3 +523,4 @@ export default function DocumentArchiveModule({
     </div>
   );
 }
+

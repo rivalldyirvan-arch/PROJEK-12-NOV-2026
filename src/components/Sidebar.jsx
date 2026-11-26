@@ -18,7 +18,8 @@ import {
   Scale,
   FileArchive,
   TrendingUp,
-  Wallet
+  Wallet,
+  SlidersHorizontal
 } from 'lucide-react';
 import { useAuth } from '../lib/authContext';
 
@@ -57,6 +58,12 @@ export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, 
       label: 'Neraca Saldo', 
       sub: 'Validasi Keseimbangan',
       icon: Scale
+    },
+    { 
+      id: 'adjusting-closing', 
+      label: 'Penyesuaian & Closing', 
+      sub: 'Adjusted TB & Penutupan',
+      icon: SlidersHorizontal
     },
     { 
       id: 'vendors', 

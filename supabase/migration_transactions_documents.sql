@@ -155,3 +155,4 @@ CREATE POLICY "Allow public all access on operational_expenses" ON public.operat
 
 DROP POLICY IF EXISTS "Allow public all access on cash_bank_transactions" ON public.cash_bank_transactions;
 CREATE POLICY "Allow public all access on cash_bank_transactions" ON public.cash_bank_transactions FOR ALL USING (true) WITH CHECK (true);
+

@@ -18,6 +18,7 @@ import TrialBalanceModule from './pages/TrialBalanceModule';
 import DocumentArchiveModule from './pages/DocumentArchiveModule';
 import SalesModule from './pages/SalesModule';
 import ExpenseCashBankModule from './pages/ExpenseCashBankModule';
+import AdjustingClosingModule from './pages/AdjustingClosingModule';
 import LoginPage from './pages/LoginPage';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { 
@@ -256,6 +257,18 @@ function MainAppContent() {
                     setLedgerDrillDown({ accountCode, startDate, endDate });
                     setActiveTab('ledger');
                   }}
+                />
+              )}
+
+              {activeTab === 'adjusting-closing' && (
+                <AdjustingClosingModule 
+                  coaList={coaList}
+                  journalEntries={journalEntriesList}
+                  accountingPeriods={accountingPeriods}
+                  journalSequences={journalSequences}
+                  coaMappings={coaMappings}
+                  onRefresh={loadData}
+                  showToast={showToast}
                 />
               )}
 
