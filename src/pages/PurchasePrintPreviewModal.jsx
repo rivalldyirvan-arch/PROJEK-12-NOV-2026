@@ -1,12 +1,24 @@
 import React from 'react';
-import { X, Printer, Download, Building2, CheckCircle2 } from 'lucide-react';
+import { X, Printer, Download, Building2, CheckCircle2, Trash2, CreditCard, Calendar, Hash, Banknote, CheckCircle } from 'lucide-react';
 import { formatRupiah, formatDateIndo } from '../lib/taxRules';
 
-export default function PurchasePrintPreviewModal({ pr, vendor, coaList, onClose }) {
+export default function PurchasePrintPreviewModal({ pr, vendor, coaList, onClose, onDelete }) {
   if (!pr) return null;
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const paymentHistory = Array.isArray(pr.paymentHistory)
+    ? pr.paymentHistory.filter(h => Number(h.allocatedAmount) > 0)
+    : [];
+
+  const isLunas = pr.status === 'Lunas';
+  const isSebagian = pr.status === 'Sebagian Dibayar';
+  const hasPembayaran = paymentHistory.length > 0 || isLunas || isSebagian;
+
+  const handleDelete = () => {
+    if (onDelete) onDelete(pr);
   };
 
   return (
@@ -18,6 +30,12 @@ export default function PurchasePrintPreviewModal({ pr, vendor, coaList, onClose
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Pratinjau Dokumen Cetak</span>
             <span className="text-slate-400">•</span>
             <span className="text-xs font-mono">{pr.requestNumber}</span>
+            {isLunas && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-500 text-white">LUNAS</span>
+            )}
+            {isSebagian && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white">SEBAGIAN DIBAYAR</span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -27,6 +45,16 @@ export default function PurchasePrintPreviewModal({ pr, vendor, coaList, onClose
               <Printer className="w-3.5 h-3.5" />
               Cetak / Simpan PDF
             </button>
+            {isLunas && onDelete && (
+              <button
+                onClick={handleDelete}
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                title="Hapus pengajuan ini (akan membalik jurnal COA)"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Hapus
+              </button>
+            )}
             <button
               onClick={onClose}
               className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
@@ -159,6 +187,98 @@ export default function PurchasePrintPreviewModal({ pr, vendor, coaList, onClose
             </div>
           </div>
 
+          {/* ================================================================ */}
+          {/* SECTION: INFORMASI PEMBAYARAN / PELUNASAN                        */}
+          {/* ================================================================ */}
+          {hasPembayaran && (
+            <div className="mt-4">
+              {/* Status Badge Lunas / Sebagian */}
+              {isLunas && (
+                <div className="mb-3 flex items-center gap-2 px-4 py-2.5 bg-teal-50 rounded-xl border border-teal-200">
+                  <CheckCircle className="w-4 h-4 text-teal-600 flex-shrink-0" />
+                  <div>
+                    <span className="text-xs font-extrabold text-teal-800 uppercase tracking-wide">LUNAS</span>
+                    <span className="text-[11px] text-teal-700 ml-2">— Pengajuan ini telah selesai dibayarkan</span>
+                  </div>
+                </div>
+              )}
+              {isSebagian && (
+                <div className="mb-3 flex items-center gap-2 px-4 py-2.5 bg-amber-50 rounded-xl border border-amber-200">
+                  <Banknote className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  <div>
+                    <span className="text-xs font-extrabold text-amber-800 uppercase tracking-wide">SEBAGIAN DIBAYAR</span>
+                    <span className="text-[11px] text-amber-700 ml-2">
+                      — Sisa: <strong>{formatRupiah(pr.remainingPayable || 0)}</strong>
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Tabel Riwayat Pembayaran */}
+              {paymentHistory.length > 0 && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="bg-teal-800 px-4 py-2 text-white text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
+                    <CreditCard className="w-3 h-3" />
+                    Riwayat Pembayaran / Pelunasan
+                  </div>
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200">
+                        <th className="py-2 px-3 w-6 text-center">#</th>
+                        <th className="py-2 px-3">
+                          <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />Tgl Pelunasan</span>
+                        </th>
+                        <th className="py-2 px-3">
+                          <span className="flex items-center gap-1"><Hash className="w-3 h-3" />No. Transaksi / Ref</span>
+                        </th>
+                        <th className="py-2 px-3">
+                          <span className="flex items-center gap-1"><CreditCard className="w-3 h-3" />Metode</span>
+                        </th>
+                        <th className="py-2 px-3">Akun Bank / Kas</th>
+                        <th className="py-2 px-3 text-right">
+                          <span className="flex items-center justify-end gap-1"><Banknote className="w-3 h-3" />Nominal</span>
+                        </th>
+                        <th className="py-2 px-3 text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {paymentHistory.map((pay, idx) => (
+                        <tr key={pay.id || idx} className="hover:bg-teal-50/40 transition">
+                          <td className="py-2.5 px-3 text-center text-slate-400 font-mono">{idx + 1}</td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-800">{pay.paymentDate || '-'}</td>
+                          <td className="py-2.5 px-3 font-mono text-xs text-teal-800 font-bold">{pay.referenceNo || '-'}</td>
+                          <td className="py-2.5 px-3 text-slate-600">{pay.paymentMethod || '-'}</td>
+                          <td className="py-2.5 px-3 text-slate-600 text-[11px]">{pay.accountName || pay.accountCode || '-'}</td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-teal-800">
+                            {formatRupiah(Number(pay.allocatedAmount || 0))}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                              Number(pay.allocatedAmount) > 0
+                                ? 'bg-teal-100 text-teal-800 border border-teal-200'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {pay.status || 'Lunas'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-teal-800 text-white font-bold text-[11px]">
+                        <td colSpan={5} className="py-2 px-3 uppercase tracking-wider text-[10px]">Total Terbayar</td>
+                        <td className="py-2 px-3 text-right font-mono text-teal-200">
+                          {formatRupiah(paymentHistory.reduce((s, p) => s + Number(p.allocatedAmount || 0), 0))}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Signature Boxes */}
           <div className="grid grid-cols-3 gap-6 text-center text-xs pt-4 border-t border-slate-200">
             <div>
@@ -174,7 +294,7 @@ export default function PurchasePrintPreviewModal({ pr, vendor, coaList, onClose
               <div className="h-16 flex items-center justify-center font-bold text-slate-800">
                 Siti Rahmawati
               </div>
-              <div className="border-t border-slate-300 pt-1 font-semibold text-slate-700">Finance & Tax Spv</div>
+              <div className="border-t border-slate-300 pt-1 font-semibold text-slate-700">Finance &amp; Tax Spv</div>
             </div>
 
             <div>

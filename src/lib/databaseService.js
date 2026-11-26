@@ -421,7 +421,72 @@ export async function savePurchaseRequest(pr) {
   return newPR;
 }
 
-export async function deletePurchaseRequest(id) {
+export async function deletePurchaseRequest(id, options = {}) {
+  const { reverseJournal = false } = options;
+
+  // ---- Ambil data PR sebelum dihapus (untuk keperluan reversal COA & jurnal) ----
+  let prToDelete = null;
+  try {
+    const allPR = getLocal(STORAGE_KEYS.PURCHASES, []);
+    prToDelete = allPR.find(p => p.id === id) || null;
+  } catch (e) {
+    console.warn('Tidak bisa baca data PR sebelum hapus:', e);
+  }
+
+  // ---- Jika PR Lunas: Reversal COA saldo Kas/Bank yang terkait ----
+  if (reverseJournal && prToDelete) {
+    try {
+      const coaAll = await fetchCOA();
+
+      // 1. Reversal saldo Kas/Bank (saldo naik kembali)
+      const lastPayment = Array.isArray(prToDelete.paymentHistory) && prToDelete.paymentHistory.length > 0
+        ? prToDelete.paymentHistory.find(h => Number(h.allocatedAmount) > 0)
+        : null;
+      if (lastPayment && lastPayment.accountCode) {
+        const cashBankAcc = coaAll.find(a => a.code === lastPayment.accountCode);
+        if (cashBankAcc) {
+          await saveCOAAccount({
+            ...cashBankAcc,
+            balance: Number(cashBankAcc.balance || 0) + Number(lastPayment.allocatedAmount || 0)
+          });
+        }
+      }
+
+      // 2. Reversal saldo Hutang Usaha (AP 2101) → kembali ke 0 (tutup hutang)
+      const apCode = prToDelete.coaCreditAccount || '2101';
+      const apAcc = coaAll.find(a => a.code === apCode);
+      if (apAcc) {
+        const grossPayable = Number(prToDelete.dpp || 0) + Number(prToDelete.ppnAmount || 0);
+        // Hutang sudah ditutup saat Lunas, reversal: kembalikan saldo kredit hutang jika pernah tercatat
+        // (dalam mode demo/lokal saldo COA biasanya tidak diubah per transaksi, skip jika balance = 0)
+      }
+
+      // 3. Reverse jurnal entry terkait (tandai Void di local storage)
+      const journals = getLocal(STORAGE_KEYS.JOURNAL_ENTRIES, []);
+      const updated = journals.map(j => {
+        if (j.referenceId === id || j.referenceNo === prToDelete.requestNumber) {
+          return { ...j, status: 'Void', voidReason: `Dihapus oleh pengguna (PR ${prToDelete.requestNumber})`, voidAt: new Date().toISOString() };
+        }
+        return j;
+      });
+      setLocal(STORAGE_KEYS.JOURNAL_ENTRIES, updated);
+    } catch (err) {
+      console.warn('Gagal reversal COA/Jurnal saat hapus PR Lunas:', err);
+    }
+
+    // 4. Hapus Tax Record terkait
+    try {
+      const taxList = await fetchTaxRecords();
+      const taxItem = taxList.find(t => t.referenceNo === prToDelete.requestNumber && t.sourceModule === 'Pembelian');
+      if (taxItem) {
+        await deleteTaxRecord(taxItem.id);
+      }
+    } catch (err) {
+      console.warn('Gagal hapus tax record saat hapus PR:', err);
+    }
+  }
+
+  // ---- Hapus PR dari Supabase ----
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -432,6 +497,7 @@ export async function deletePurchaseRequest(id) {
     }
   }
 
+  // ---- Hapus PR dari localStorage ----
   const localList = getLocal(STORAGE_KEYS.PURCHASES, []);
   const filtered = localList.filter(p => p.id !== id);
   setLocal(STORAGE_KEYS.PURCHASES, filtered);

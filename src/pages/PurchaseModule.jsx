@@ -906,9 +906,13 @@ export default function PurchaseModule({
   };
 
   const handleDelete = async (pr) => {
-    if (window.confirm(`Hapus pengajuan pembelian ${pr.requestNumber}?`)) {
-      await deletePurchaseRequest(pr.id);
-      showToast?.(`Pengajuan ${pr.requestNumber} berhasil dihapus`, 'success');
+    const isLunas = pr.status === 'Lunas';
+    const confirmMsg = isLunas
+      ? `⚠️ Pengajuan ${pr.requestNumber} sudah LUNAS.\n\nMenghapus akan membalik jurnal akuntansi dan saldo COA terkait secara otomatis.\n\nLanjutkan hapus?`
+      : `Hapus pengajuan pembelian ${pr.requestNumber}?`;
+    if (window.confirm(confirmMsg)) {
+      await deletePurchaseRequest(pr.id, { reverseJournal: isLunas });
+      showToast?.(`Pengajuan ${pr.requestNumber} berhasil dihapus${isLunas ? ' beserta pembalikan jurnal COA' : ''}`, 'success');
       onRefresh();
     }
   };
@@ -1350,13 +1354,21 @@ export default function PurchaseModule({
                                     <Copy className="w-3.5 h-3.5" />
                                     Duplikat Pengajuan
                                   </button>
-                                  <button
-                                    onClick={() => { handleDelete(pr); setOpenActionMenu(null); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-bold text-rose-600 hover:bg-rose-50 transition text-left border-t border-slate-100"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                    Hapus Pengajuan
-                                  </button>
+                                  {pr.status !== 'Lunas' && (
+                                    <button
+                                      onClick={() => { handleDelete(pr); setOpenActionMenu(null); }}
+                                      className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-bold text-rose-600 hover:bg-rose-50 transition text-left border-t border-slate-100"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                      Hapus Pengajuan
+                                    </button>
+                                  )}
+                                  {pr.status === 'Lunas' && (
+                                    <div className="px-3 py-2 text-[10px] text-slate-400 italic border-t border-slate-100 flex items-center gap-1">
+                                      <Lock className="w-3 h-3" />
+                                      Hapus tersedia di tampilan Review
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -1962,6 +1974,10 @@ export default function PurchaseModule({
           vendor={vendorList.find(v => v.id === printPR.vendorId)}
           coaList={coaList}
           onClose={() => setPrintPR(null)}
+          onDelete={printPR.status === 'Lunas' ? (pr) => {
+            setPrintPR(null);
+            handleDelete(pr);
+          } : undefined}
         />
       )}
 
