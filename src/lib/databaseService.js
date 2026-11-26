@@ -33,7 +33,12 @@ const STORAGE_KEYS = {
   ACCOUNTING_PERIODS: 'app_accounting_periods_data',
   JOURNAL_SEQUENCES: 'app_journal_sequences_data',
   COA_MAPPINGS: 'app_coa_mappings_data',
-  AUDIT_LOGS: 'app_audit_logs_data'
+  AUDIT_LOGS: 'app_audit_logs_data',
+  DOCUMENTS: 'app_documents_data',
+  CUSTOMERS: 'app_customers_data',
+  SALES_INVOICES: 'app_sales_invoices_data',
+  OPERATIONAL_EXPENSES: 'app_operational_expenses_data',
+  CASH_BANK_TX: 'app_cash_bank_tx_data'
 };
 
 // Local storage helpers (only for offline / demo mode)
@@ -2763,6 +2768,692 @@ export async function deleteProduct(id) {
   const filtered = localList.filter(p => p.id !== id);
   setLocal(STORAGE_KEYS.PRODUCTS, filtered);
   return true;
+}
+
+// ==============================================================================
+// 11. MODUL MANAJEMEN DOKUMEN & ARSIP (RETENSI 10 TAHUN)
+// ==============================================================================
+export async function fetchDocuments() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('documents').select('*').order('doc_date', { ascending: false });
+      if (!error && data) {
+        return data.map(d => ({
+          id: d.id,
+          docNumber: d.doc_number,
+          docType: d.doc_type,
+          category: d.category,
+          docDate: d.doc_date,
+          partnerName: d.partner_name || '',
+          partnerNpwp: d.partner_npwp || '',
+          description: d.description || '',
+          dppAmount: Number(d.dpp_amount || 0),
+          ppnAmount: Number(d.ppn_amount || 0),
+          pphAmount: Number(d.pph_amount || 0),
+          totalAmount: Number(d.total_amount || 0),
+          paymentInfo: d.payment_info || '',
+          fileName: d.file_name || '',
+          fileType: d.file_type || 'PDF',
+          fileSize: Number(d.file_size || 0),
+          fileDataUrl: d.file_data_url || '',
+          ocrExtracted: Boolean(d.ocr_extracted),
+          ocrConfirmed: Boolean(d.ocr_confirmed),
+          validationStatus: d.validation_status || 'Valid',
+          validationNotes: d.validation_notes || '',
+          journalEntryId: d.journal_entry_id || null,
+          journalEntryNumber: d.journal_entry_number || '',
+          accountCode: d.account_code || '',
+          version: Number(d.version || 1),
+          retentionUntil: d.retention_until || '',
+          isLocked: Boolean(d.is_locked),
+          uploadedBy: d.uploaded_by || 'Sistem',
+          createdAt: d.created_at
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading documents from Supabase:', err);
+    }
+  }
+  return getLocal(STORAGE_KEYS.DOCUMENTS, []);
+}
+
+export async function saveDocument(doc, currentUser = null) {
+  const id = doc.id || `doc-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const docDate = doc.docDate || new Date().toISOString().slice(0, 10);
+  const retDate = new Date(docDate);
+  retDate.setFullYear(retDate.getFullYear() + 10);
+
+  const existingList = getLocal(STORAGE_KEYS.DOCUMENTS, []);
+  const prev = existingList.find(d => d.id === id);
+
+  const newDoc = {
+    ...doc,
+    id,
+    docDate,
+    version: prev ? (Number(prev.version || 1) + 1) : (Number(doc.version || 1)),
+    retentionUntil: doc.retentionUntil || retDate.toISOString().slice(0, 10),
+    uploadedBy: doc.uploadedBy || currentUser?.fullName || 'Staff Keuangan',
+    createdAt: prev?.createdAt || new Date().toISOString()
+  };
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('documents').upsert({
+        id: newDoc.id,
+        doc_number: newDoc.docNumber,
+        doc_type: newDoc.docType,
+        category: newDoc.category,
+        doc_date: newDoc.docDate,
+        partner_name: newDoc.partnerName || null,
+        partner_npwp: newDoc.partnerNpwp || null,
+        description: newDoc.description || '',
+        dpp_amount: Number(newDoc.dppAmount || 0),
+        ppn_amount: Number(newDoc.ppnAmount || 0),
+        pph_amount: Number(newDoc.pphAmount || 0),
+        total_amount: Number(newDoc.totalAmount || 0),
+        payment_info: newDoc.paymentInfo || null,
+        file_name: newDoc.fileName || null,
+        file_type: newDoc.fileType || 'PDF',
+        file_size: Number(newDoc.fileSize || 0),
+        file_data_url: newDoc.fileDataUrl || null,
+        ocr_extracted: Boolean(newDoc.ocrExtracted),
+        ocr_confirmed: Boolean(newDoc.ocrConfirmed),
+        validation_status: newDoc.validationStatus || 'Valid',
+        validation_notes: newDoc.validationNotes || '',
+        journal_entry_id: newDoc.journalEntryId || null,
+        journal_entry_number: newDoc.journalEntryNumber || null,
+        account_code: newDoc.accountCode || null,
+        version: newDoc.version,
+        retention_until: newDoc.retentionUntil,
+        is_locked: Boolean(newDoc.isLocked),
+        uploaded_by: newDoc.uploadedBy,
+        updated_at: new Date().toISOString()
+      });
+    } catch (err) {
+      console.warn('Supabase upsert document error:', err);
+    }
+  }
+
+  const idx = existingList.findIndex(d => d.id === id);
+  const updated = idx >= 0 ? existingList.map((d, i) => (i === idx ? newDoc : d)) : [newDoc, ...existingList];
+  setLocal(STORAGE_KEYS.DOCUMENTS, updated);
+
+  await recordAuditLog({
+    userId: currentUser?.id || null,
+    userName: currentUser?.fullName || 'Sistem',
+    action: prev ? 'UPDATE_DOCUMENT' : 'UPLOAD_DOCUMENT',
+    entityType: 'documents',
+    entityId: newDoc.id,
+    referenceNo: newDoc.docNumber,
+    afterData: { docType: newDoc.docType, category: newDoc.category, totalAmount: newDoc.totalAmount, version: newDoc.version },
+    reason: `Arsip dokumen ${newDoc.docType} (${newDoc.docNumber})`
+  });
+
+  return newDoc;
+}
+
+export async function deleteDocument(doc, currentUser = null) {
+  if (doc.isLocked || doc.journalEntryId) {
+    throw new Error('Dokumen yang sudah dikunci atau terhubung dengan jurnal tidak dapat dihapus (kebijakan retensi 10 tahun).');
+  }
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('documents').delete().eq('id', doc.id);
+    } catch (err) {
+      console.warn('Supabase delete document error:', err);
+    }
+  }
+  const existing = getLocal(STORAGE_KEYS.DOCUMENTS, []);
+  setLocal(STORAGE_KEYS.DOCUMENTS, existing.filter(d => d.id !== doc.id));
+  await recordAuditLog({
+    userId: currentUser?.id || null,
+    userName: currentUser?.fullName || 'Sistem',
+    action: 'DELETE_DOCUMENT',
+    entityType: 'documents',
+    entityId: doc.id,
+    referenceNo: doc.docNumber,
+    reason: 'Penghapusan dokumen draft yang belum terhubung jurnal'
+  });
+  return true;
+}
+
+// ==============================================================================
+// 12. MODUL PENJUALAN & PIUTANG USAHA (CUSTOMERS & SALES INVOICES)
+// ==============================================================================
+export async function fetchCustomers() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('customers').select('*').order('name', { ascending: true });
+      if (!error && data) {
+        return data.map(c => ({
+          id: c.id,
+          code: c.code,
+          name: c.name,
+          npwp: c.npwp || '',
+          email: c.email || '',
+          phone: c.phone || '',
+          address: c.address || '',
+          paymentTerm: c.payment_term || 'Net 30',
+          status: c.status || 'Aktif'
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading customers:', err);
+    }
+  }
+  return getLocal(STORAGE_KEYS.CUSTOMERS, []);
+}
+
+export async function saveCustomer(customer) {
+  const id = customer.id || `cust-${Date.now()}`;
+  const newCust = { ...customer, id };
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('customers').upsert({
+        id: newCust.id,
+        code: newCust.code,
+        name: newCust.name,
+        npwp: newCust.npwp || null,
+        email: newCust.email || null,
+        phone: newCust.phone || null,
+        address: newCust.address || null,
+        payment_term: newCust.paymentTerm || 'Net 30',
+        status: newCust.status || 'Aktif'
+      });
+    } catch (err) {
+      console.warn('Supabase upsert customer error:', err);
+    }
+  }
+  const local = getLocal(STORAGE_KEYS.CUSTOMERS, []);
+  const idx = local.findIndex(c => c.id === id);
+  setLocal(STORAGE_KEYS.CUSTOMERS, idx >= 0 ? local.map((c, i) => (i === idx ? newCust : c)) : [newCust, ...local]);
+  return newCust;
+}
+
+export async function fetchSalesInvoices() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('sales_invoices').select('*').order('invoice_date', { ascending: false });
+      if (!error && data) {
+        return data.map(s => ({
+          id: s.id,
+          invoiceNumber: s.invoice_number,
+          invoiceDate: s.invoice_date,
+          dueDate: s.due_date,
+          customerId: s.customer_id,
+          customerName: s.customer_name,
+          title: s.title,
+          department: s.department || 'Marketing & Sales',
+          subtotal: Number(s.subtotal || 0),
+          discount: Number(s.discount || 0),
+          dpp: Number(s.dpp || 0),
+          ppnRate: Number(s.ppn_rate || 0),
+          ppnAmount: Number(s.ppn_amount || 0),
+          totalAmount: Number(s.total_amount || 0),
+          paidAmount: Number(s.paid_amount || 0),
+          remainingAmount: Number(s.remaining_amount || 0),
+          status: s.status || 'Draft',
+          arAccountCode: s.ar_account_code || '1120',
+          salesAccountCode: s.sales_account_code || '4101',
+          items: s.items || [],
+          paymentHistory: s.payment_history || [],
+          journalEntryId: s.journal_entry_id || null,
+          journalEntryNumber: s.journal_entry_number || '',
+          createdBy: s.created_by || 'Sistem'
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading sales_invoices:', err);
+    }
+  }
+  return getLocal(STORAGE_KEYS.SALES_INVOICES, []);
+}
+
+export async function saveSalesInvoice(inv, options = {}) {
+  const { postNow = false, currentUser = null, coaList = [], mappings = [] } = options;
+  const id = inv.id || `sinv-${Date.now()}`;
+  const subtotal = Number(inv.subtotal || 0);
+  const discount = Number(inv.discount || 0);
+  const dpp = Math.max(0, subtotal - discount);
+  const ppnAmount = Number(inv.ppnAmount || 0);
+  const totalAmount = dpp + ppnAmount;
+
+  let newInv = {
+    ...inv,
+    id,
+    subtotal,
+    discount,
+    dpp,
+    ppnAmount,
+    totalAmount,
+    paidAmount: Number(inv.paidAmount || 0),
+    remainingAmount: inv.status === 'Lunas' ? 0 : Math.max(0, totalAmount - Number(inv.paidAmount || 0)),
+    status: postNow ? 'Posted' : (inv.status || 'Draft'),
+    createdBy: inv.createdBy || currentUser?.fullName || 'Staff Keuangan'
+  };
+
+  if (postNow && !newInv.journalEntryId) {
+    const arCode = newInv.arAccountCode || mappings.find(m => m.mappingKey === 'default_ar')?.accountCode || '1120';
+    const salesCode = newInv.salesAccountCode || mappings.find(m => m.mappingKey === 'default_sales')?.accountCode || '4101';
+    const discCode = mappings.find(m => m.mappingKey === 'default_sales_discount')?.accountCode || '4-40201';
+    const ppnOutCode = mappings.find(m => m.mappingKey === 'default_ppn_keluaran')?.accountCode || '2115';
+
+    const getName = (code, fb) => coaList.find(c => c.code === code)?.name || fb;
+
+    const lines = [
+      {
+        accountCode: arCode,
+        accountName: getName(arCode, 'Piutang Usaha'),
+        description: `Piutang atas ${newInv.invoiceNumber} (${newInv.customerName})`,
+        debit: totalAmount,
+        credit: 0
+      }
+    ];
+
+    if (discount > 0) {
+      lines.push({
+        accountCode: discCode,
+        accountName: getName(discCode, 'Diskon Penjualan'),
+        description: `Diskon Penjualan ${newInv.invoiceNumber}`,
+        debit: discount,
+        credit: 0
+      });
+    }
+
+    lines.push({
+      accountCode: salesCode,
+      accountName: getName(salesCode, 'Pendapatan Jasa & Proyek'),
+      description: `Pendapatan ${newInv.title}`,
+      debit: 0,
+      credit: subtotal
+    });
+
+    if (ppnAmount > 0) {
+      lines.push({
+        accountCode: ppnOutCode,
+        accountName: getName(ppnOutCode, 'Hutang Pajak - PPN Keluaran'),
+        description: `PPN Keluaran (${newInv.ppnRate || 11}%) atas ${newInv.invoiceNumber}`,
+        debit: 0,
+        credit: ppnAmount
+      });
+    }
+
+    const journal = await saveJournalEntry({
+      entryDate: newInv.invoiceDate,
+      journalType: 'Jurnal Penjualan',
+      sourceModule: 'Penjualan',
+      referenceId: id,
+      referenceNo: newInv.invoiceNumber,
+      description: `Faktur Penjualan ${newInv.invoiceNumber} - ${newInv.customerName}: ${newInv.title}`,
+      vendorOrCustomer: newInv.customerName,
+      department: newInv.department || 'Marketing & Sales',
+      status: 'Posted',
+      lines
+    }, { currentUser, validate: true });
+
+    newInv.journalEntryId = journal.id;
+    newInv.journalEntryNumber = journal.entryNumber;
+  }
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('sales_invoices').upsert({
+        id: newInv.id,
+        invoice_number: newInv.invoiceNumber,
+        invoice_date: newInv.invoiceDate,
+        due_date: newInv.dueDate || null,
+        customer_id: newInv.customerId || null,
+        customer_name: newInv.customerName,
+        title: newInv.title,
+        department: newInv.department,
+        subtotal: newInv.subtotal,
+        discount: newInv.discount,
+        dpp: newInv.dpp,
+        ppn_rate: Number(newInv.ppnRate || 0),
+        ppn_amount: newInv.ppnAmount,
+        total_amount: newInv.totalAmount,
+        paid_amount: newInv.paidAmount,
+        remaining_amount: newInv.remainingAmount,
+        status: newInv.status,
+        ar_account_code: newInv.arAccountCode || '1120',
+        sales_account_code: newInv.salesAccountCode || '4101',
+        items: newInv.items || [],
+        payment_history: newInv.paymentHistory || [],
+        journal_entry_id: newInv.journalEntryId || null,
+        journal_entry_number: newInv.journalEntryNumber || null,
+        created_by: newInv.createdBy,
+        updated_at: new Date().toISOString()
+      });
+    } catch (err) {
+      console.warn('Supabase upsert sales_invoices error:', err);
+    }
+  }
+
+  const local = getLocal(STORAGE_KEYS.SALES_INVOICES, []);
+  const idx = local.findIndex(s => s.id === id);
+  setLocal(STORAGE_KEYS.SALES_INVOICES, idx >= 0 ? local.map((s, i) => (i === idx ? newInv : s)) : [newInv, ...local]);
+  return newInv;
+}
+
+export async function receiveSalesPayment({ invoice, paymentDate, amount, cashAccountCode, cashAccountName, referenceNo, currentUser, coaList = [] }) {
+  const payAmt = Number(amount) || 0;
+  if (payAmt <= 0 || payAmt > Number(invoice.remainingAmount || invoice.totalAmount)) {
+    throw new Error('Nominal penerimaan piutang harus > 0 dan tidak melebihi sisa piutang.');
+  }
+
+  const arCode = invoice.arAccountCode || '1120';
+  const arName = coaList.find(c => c.code === arCode)?.name || 'Piutang Usaha';
+
+  const journal = await saveJournalEntry({
+    entryDate: paymentDate,
+    journalType: 'Jurnal Penerimaan Kas',
+    sourceModule: 'Penjualan (Pelunasan)',
+    referenceId: invoice.id,
+    referenceNo: referenceNo || `RCV-${invoice.invoiceNumber}`,
+    description: `Penerimaan Piutang ${invoice.invoiceNumber} dari ${invoice.customerName}`,
+    vendorOrCustomer: invoice.customerName,
+    department: invoice.department || 'Finance & Accounting',
+    status: 'Posted',
+    lines: [
+      {
+        accountCode: cashAccountCode,
+        accountName: cashAccountName,
+        description: `Penerimaan Kas/Bank (${referenceNo || invoice.invoiceNumber})`,
+        debit: payAmt,
+        credit: 0
+      },
+      {
+        accountCode: arCode,
+        accountName: arName,
+        description: `Pelunasan Piutang ${invoice.invoiceNumber}`,
+        debit: 0,
+        credit: payAmt
+      }
+    ]
+  }, { currentUser, validate: true });
+
+  const newPaid = Number(invoice.paidAmount || 0) + payAmt;
+  const newRemaining = Math.max(0, Number(invoice.totalAmount) - newPaid);
+  const newStatus = newRemaining <= 0 ? 'Lunas' : 'Sebagian Dibayar';
+
+  const payRecord = {
+    id: `rcv-${Date.now()}`,
+    paymentDate,
+    referenceNo: referenceNo || journal.entryNumber,
+    cashAccountCode,
+    cashAccountName,
+    amount: payAmt,
+    journalEntryNumber: journal.entryNumber
+  };
+
+  const updatedInv = {
+    ...invoice,
+    paidAmount: newPaid,
+    remainingAmount: newRemaining,
+    status: newStatus,
+    paymentHistory: [payRecord, ...(invoice.paymentHistory || [])]
+  };
+
+  return saveSalesInvoice(updatedInv, { postNow: false, currentUser });
+}
+
+// ==============================================================================
+// 13. MODUL BIAYA OPERASIONAL & KAS/BANK (+ REKONSILIASI)
+// ==============================================================================
+export async function fetchOperationalExpenses() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('operational_expenses').select('*').order('expense_date', { ascending: false });
+      if (!error && data) {
+        return data.map(e => ({
+          id: e.id,
+          expenseNumber: e.expense_number,
+          expenseDate: e.expense_date,
+          category: e.category,
+          department: e.department,
+          payeeName: e.payee_name || '',
+          description: e.description,
+          expenseAccountCode: e.expense_account_code,
+          expenseAccountName: e.expense_account_name,
+          paymentAccountCode: e.payment_account_code,
+          paymentAccountName: e.payment_account_name,
+          dppAmount: Number(e.dpp_amount || 0),
+          ppnAmount: Number(e.ppn_amount || 0),
+          totalAmount: Number(e.total_amount || 0),
+          referenceNo: e.reference_no || '',
+          status: e.status || 'Posted',
+          journalEntryId: e.journal_entry_id || null,
+          journalEntryNumber: e.journal_entry_number || '',
+          createdBy: e.created_by || 'Sistem'
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading operational_expenses:', err);
+    }
+  }
+  return getLocal(STORAGE_KEYS.OPERATIONAL_EXPENSES, []);
+}
+
+export async function saveOperationalExpense(exp, options = {}) {
+  const { postNow = true, currentUser = null, coaList = [] } = options;
+  const id = exp.id || `exp-${Date.now()}`;
+  const dpp = Number(exp.dppAmount || 0);
+  const ppn = Number(exp.ppnAmount || 0);
+  const total = dpp + ppn;
+
+  let newExp = {
+    ...exp,
+    id,
+    dppAmount: dpp,
+    ppnAmount: ppn,
+    totalAmount: total,
+    status: postNow ? 'Posted' : (exp.status || 'Draft'),
+    createdBy: exp.createdBy || currentUser?.fullName || 'Staff Keuangan'
+  };
+
+  if (postNow && !newExp.journalEntryId) {
+    const lines = [
+      {
+        accountCode: newExp.expenseAccountCode,
+        accountName: newExp.expenseAccountName || coaList.find(c => c.code === newExp.expenseAccountCode)?.name || 'Beban Operasional',
+        description: newExp.description,
+        debit: dpp,
+        credit: 0
+      }
+    ];
+    if (ppn > 0) {
+      lines.push({
+        accountCode: '1601',
+        accountName: 'PPN Masukan (Pajak Masukan)',
+        description: `PPN Masukan atas ${newExp.expenseNumber}`,
+        debit: ppn,
+        credit: 0
+      });
+    }
+    lines.push({
+      accountCode: newExp.paymentAccountCode,
+      accountName: newExp.paymentAccountName || coaList.find(c => c.code === newExp.paymentAccountCode)?.name || 'Kas / Bank',
+      description: `Pembayaran biaya ${newExp.expenseNumber}`,
+      debit: 0,
+      credit: total
+    });
+
+    const journal = await saveJournalEntry({
+      entryDate: newExp.expenseDate,
+      journalType: newExp.paymentAccountCode === '1101' ? 'Jurnal Pengeluaran Kas' : 'Jurnal Bank',
+      sourceModule: 'Biaya Operasional',
+      referenceId: id,
+      referenceNo: newExp.referenceNo || newExp.expenseNumber,
+      description: `Biaya ${newExp.category}: ${newExp.description}`,
+      vendorOrCustomer: newExp.payeeName || '',
+      department: newExp.department || 'Operations',
+      status: 'Posted',
+      lines
+    }, { currentUser, validate: true });
+
+    newExp.journalEntryId = journal.id;
+    newExp.journalEntryNumber = journal.entryNumber;
+  }
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('operational_expenses').upsert({
+        id: newExp.id,
+        expense_number: newExp.expenseNumber,
+        expense_date: newExp.expenseDate,
+        category: newExp.category,
+        department: newExp.department,
+        payee_name: newExp.payeeName || null,
+        description: newExp.description,
+        expense_account_code: newExp.expenseAccountCode,
+        expense_account_name: newExp.expenseAccountName,
+        payment_account_code: newExp.paymentAccountCode,
+        payment_account_name: newExp.paymentAccountName,
+        dpp_amount: newExp.dppAmount,
+        ppn_amount: newExp.ppnAmount,
+        total_amount: newExp.totalAmount,
+        reference_no: newExp.referenceNo || null,
+        status: newExp.status,
+        journal_entry_id: newExp.journalEntryId || null,
+        journal_entry_number: newExp.journalEntryNumber || null,
+        created_by: newExp.createdBy
+      });
+    } catch (err) {
+      console.warn('Supabase upsert operational_expenses error:', err);
+    }
+  }
+
+  const local = getLocal(STORAGE_KEYS.OPERATIONAL_EXPENSES, []);
+  const idx = local.findIndex(e => e.id === id);
+  setLocal(STORAGE_KEYS.OPERATIONAL_EXPENSES, idx >= 0 ? local.map((e, i) => (i === idx ? newExp : e)) : [newExp, ...local]);
+  return newExp;
+}
+
+export async function fetchCashBankTransactions() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('cash_bank_transactions').select('*').order('tx_date', { ascending: false });
+      if (!error && data) {
+        return data.map(t => ({
+          id: t.id,
+          txNumber: t.tx_number,
+          txDate: t.tx_date,
+          txType: t.tx_type,
+          cashAccountCode: t.cash_account_code,
+          cashAccountName: t.cash_account_name,
+          contraAccountCode: t.contra_account_code,
+          contraAccountName: t.contra_account_name,
+          partnerName: t.partner_name || '',
+          referenceNo: t.reference_no || '',
+          description: t.description,
+          amount: Number(t.amount || 0),
+          isReconciled: Boolean(t.is_reconciled),
+          reconciledAt: t.reconciled_at || null,
+          reconciledBy: t.reconciled_by || '',
+          bankStatementRef: t.bank_statement_ref || '',
+          status: t.status || 'Posted',
+          journalEntryId: t.journal_entry_id || null,
+          journalEntryNumber: t.journal_entry_number || '',
+          createdBy: t.created_by || 'Sistem'
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading cash_bank_transactions:', err);
+    }
+  }
+  return getLocal(STORAGE_KEYS.CASH_BANK_TX, []);
+}
+
+export async function saveCashBankTransaction(tx, options = {}) {
+  const { currentUser = null, postJournal = true } = options;
+  const id = tx.id || `cb-${Date.now()}`;
+  const amount = Number(tx.amount || 0);
+
+  let newTx = {
+    ...tx,
+    id,
+    amount,
+    status: 'Posted',
+    createdBy: tx.createdBy || currentUser?.fullName || 'Staff Keuangan'
+  };
+
+  if (postJournal && !newTx.journalEntryId) {
+    const isIncoming = newTx.txType === 'Kas Masuk';
+    const jType = newTx.txType === 'Kas Masuk'
+      ? 'Jurnal Penerimaan Kas'
+      : (newTx.txType === 'Transfer Bank' ? 'Jurnal Bank' : 'Jurnal Pengeluaran Kas');
+
+    const lines = isIncoming
+      ? [
+          { accountCode: newTx.cashAccountCode, accountName: newTx.cashAccountName, description: newTx.description, debit: amount, credit: 0 },
+          { accountCode: newTx.contraAccountCode, accountName: newTx.contraAccountName, description: newTx.description, debit: 0, credit: amount }
+        ]
+      : [
+          { accountCode: newTx.contraAccountCode, accountName: newTx.contraAccountName, description: newTx.description, debit: amount, credit: 0 },
+          { accountCode: newTx.cashAccountCode, accountName: newTx.cashAccountName, description: newTx.description, debit: 0, credit: amount }
+        ];
+
+    const journal = await saveJournalEntry({
+      entryDate: newTx.txDate,
+      journalType: jType,
+      sourceModule: 'Kas & Bank',
+      referenceId: id,
+      referenceNo: newTx.referenceNo || newTx.txNumber,
+      description: `${newTx.txType}: ${newTx.description}`,
+      vendorOrCustomer: newTx.partnerName || '',
+      department: 'Finance & Accounting',
+      status: 'Posted',
+      lines
+    }, { currentUser, validate: true });
+
+    newTx.journalEntryId = journal.id;
+    newTx.journalEntryNumber = journal.entryNumber;
+  }
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('cash_bank_transactions').upsert({
+        id: newTx.id,
+        tx_number: newTx.txNumber,
+        tx_date: newTx.txDate,
+        tx_type: newTx.txType,
+        cash_account_code: newTx.cashAccountCode,
+        cash_account_name: newTx.cashAccountName,
+        contra_account_code: newTx.contraAccountCode,
+        contra_account_name: newTx.contraAccountName,
+        partner_name: newTx.partnerName || null,
+        reference_no: newTx.referenceNo || null,
+        description: newTx.description,
+        amount: newTx.amount,
+        is_reconciled: Boolean(newTx.isReconciled),
+        reconciled_at: newTx.reconciledAt || null,
+        reconciled_by: newTx.reconciledBy || null,
+        bank_statement_ref: newTx.bankStatementRef || null,
+        status: newTx.status,
+        journal_entry_id: newTx.journalEntryId || null,
+        journal_entry_number: newTx.journalEntryNumber || null,
+        created_by: newTx.createdBy
+      });
+    } catch (err) {
+      console.warn('Supabase upsert cash_bank_transactions error:', err);
+    }
+  }
+
+  const local = getLocal(STORAGE_KEYS.CASH_BANK_TX, []);
+  const idx = local.findIndex(t => t.id === id);
+  setLocal(STORAGE_KEYS.CASH_BANK_TX, idx >= 0 ? local.map((t, i) => (i === idx ? newTx : t)) : [newTx, ...local]);
+  return newTx;
 }
 
 

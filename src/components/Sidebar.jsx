@@ -15,7 +15,10 @@ import {
   Package,
   BookOpen,
   Library,
-  Scale
+  Scale,
+  FileArchive,
+  TrendingUp,
+  Wallet
 } from 'lucide-react';
 import { useAuth } from '../lib/authContext';
 
@@ -69,11 +72,30 @@ export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, 
       badge: stats?.productCount || 0
     },
     { 
+      id: 'documents', 
+      label: 'Manajemen Dokumen & Arsip', 
+      sub: 'OCR & Retensi 10 Tahun',
+      icon: FileArchive,
+      badge: stats?.documentCount || 0
+    },
+    { 
+      id: 'sales', 
+      label: 'Penjualan & Piutang', 
+      sub: 'Faktur, PPN & Pelanggan',
+      icon: TrendingUp
+    },
+    { 
       id: 'purchases', 
       label: '3. Pembelian & Pengajuan', 
       icon: ShoppingCart,
       badge: stats?.pendingPrCount ? `${stats.pendingPrCount} Pending` : null,
       badgeColor: 'bg-amber-100 text-amber-800'
+    },
+    { 
+      id: 'expenses', 
+      label: 'Biaya & Kas / Bank', 
+      sub: 'Pengeluaran & Rekonsiliasi',
+      icon: Wallet
     },
     { 
       id: 'taxes', 

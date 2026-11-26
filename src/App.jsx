@@ -15,6 +15,9 @@ import ProductModule from './pages/ProductModule';
 import JournalModule from './pages/JournalModule';
 import GeneralLedgerModule from './pages/GeneralLedgerModule';
 import TrialBalanceModule from './pages/TrialBalanceModule';
+import DocumentArchiveModule from './pages/DocumentArchiveModule';
+import SalesModule from './pages/SalesModule';
+import ExpenseCashBankModule from './pages/ExpenseCashBankModule';
 import LoginPage from './pages/LoginPage';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { 
@@ -30,6 +33,11 @@ import {
   fetchJournalSequences,
   fetchCoaMappings,
   fetchAuditLogs,
+  fetchDocuments,
+  fetchCustomers,
+  fetchSalesInvoices,
+  fetchOperationalExpenses,
+  fetchCashBankTransactions,
   fetchAssetPostings,
   fetchAssetMovements,
   fetchAssetDisposals,
@@ -60,6 +68,11 @@ function MainAppContent() {
   const [journalSequences, setJournalSequences] = useState([]);
   const [coaMappings, setCoaMappings] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [documents, setDocuments] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [salesInvoices, setSalesInvoices] = useState([]);
+  const [operationalExpenses, setOperationalExpenses] = useState([]);
+  const [cashBankTx, setCashBankTx] = useState([]);
   const [assetPostingsList, setAssetPostingsList] = useState([]);
   const [assetMovementsList, setAssetMovementsList] = useState([]);
   const [assetDisposalsList, setAssetDisposalsList] = useState([]);
@@ -74,7 +87,7 @@ function MainAppContent() {
       setLoading(true);
     }
     try {
-      const [coa, vendors, products, purchases, taxes, assets, categories, journals, periods, sequences, mappings, audits, postings, movements, disposals, conn] = await Promise.all([
+      const [coa, vendors, products, purchases, taxes, assets, categories, journals, periods, sequences, mappings, audits, docs, custs, sinvs, exps, cbtx, postings, movements, disposals, conn] = await Promise.all([
         fetchCOA(),
         fetchVendors(),
         fetchProducts(),
@@ -87,6 +100,11 @@ function MainAppContent() {
         fetchJournalSequences(),
         fetchCoaMappings(),
         fetchAuditLogs(),
+        fetchDocuments(),
+        fetchCustomers(),
+        fetchSalesInvoices(),
+        fetchOperationalExpenses(),
+        fetchCashBankTransactions(),
         fetchAssetPostings(),
         fetchAssetMovements(),
         fetchAssetDisposals(),
@@ -105,6 +123,11 @@ function MainAppContent() {
       setJournalSequences(sequences || []);
       setCoaMappings(mappings || []);
       setAuditLogs(audits || []);
+      setDocuments(docs || []);
+      setCustomers(custs || []);
+      setSalesInvoices(sinvs || []);
+      setOperationalExpenses(exps || []);
+      setCashBankTx(cbtx || []);
       setAssetPostingsList(postings || []);
       setAssetMovementsList(movements || []);
       setAssetDisposalsList(disposals || []);
@@ -145,6 +168,7 @@ function MainAppContent() {
   const stats = {
     coaCount: coaList.length,
     journalCount: journalEntriesList.filter(j => j.status === 'Posted').length,
+    documentCount: documents.length,
     vendorCount: vendorList.length,
     productCount: productList.length,
     pendingPrCount: purchaseRequests.filter(p => p.status === 'Menunggu Persetujuan').length,
@@ -248,6 +272,37 @@ function MainAppContent() {
               {activeTab === 'products' && (
                 <ProductModule 
                   productList={productList}
+                  coaList={coaList}
+                  onRefresh={loadData}
+                  showToast={showToast}
+                />
+              )}
+
+              {activeTab === 'documents' && (
+                <DocumentArchiveModule 
+                  documents={documents}
+                  coaList={coaList}
+                  journalEntries={journalEntriesList}
+                  onRefresh={loadData}
+                  showToast={showToast}
+                />
+              )}
+
+              {activeTab === 'sales' && (
+                <SalesModule 
+                  salesInvoices={salesInvoices}
+                  customers={customers}
+                  coaList={coaList}
+                  coaMappings={coaMappings}
+                  onRefresh={loadData}
+                  showToast={showToast}
+                />
+              )}
+
+              {activeTab === 'expenses' && (
+                <ExpenseCashBankModule 
+                  expenses={operationalExpenses}
+                  cashBankTx={cashBankTx}
                   coaList={coaList}
                   onRefresh={loadData}
                   showToast={showToast}
