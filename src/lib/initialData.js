@@ -5,52 +5,52 @@
 
 export const INITIAL_COA = [
   // 1. ASET
-  { id: '1101', code: '1101', name: 'Kas Kecil (Petty Cash)', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 15000000, isActive: true },
-  { id: '1104', code: '1104', name: 'Kas Besar (Main Cash)', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 45000000, isActive: true },
-  { id: '1102', code: '1102', name: 'Bank BCA Operasional', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 350000000, isActive: true },
-  { id: '1103', code: '1103', name: 'Bank Mandiri Payroll & Tax', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 185000000, isActive: true },
-  { id: '1120', code: '1120', name: 'Piutang Usaha (Accounts Receivable)', category: 'Asset', subCategory: 'Piutang', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 75000000, isActive: true },
-  { id: '1130', code: '1130', name: 'Persediaan Barang Dagang / Bahan', category: 'Asset', subCategory: 'Persediaan', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 120000000, isActive: true },
-  { id: '1140', code: '1140', name: 'Uang Muka Pembelian / Vendor Advance', category: 'Asset', subCategory: 'Uang Muka', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 25000000, isActive: true },
-  { id: '1150', code: '1150', name: 'Pajak Dibayar di Muka - PPh 22', category: 'Asset', subCategory: 'Pajak Dibayar di Muka', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 4500000, isActive: true },
-  { id: '1151', code: '1151', name: 'Pajak Dibayar di Muka - PPh 23', category: 'Asset', subCategory: 'Pajak Dibayar di Muka', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 12400000, isActive: true },
-  { id: '1152', code: '1152', name: 'Pajak Dibayar di Muka - PPh 25 (Angsuran)', category: 'Asset', subCategory: 'Pajak Dibayar di Muka', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 36000000, isActive: true },
-  { id: '1153', code: '1153', name: 'PPN Masukan (Input VAT)', category: 'Asset', subCategory: 'Pajak Dibayar di Muka', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 42000000, isActive: true },
-  { id: '1201', code: '1201', name: 'Peralatan & Server Kantor', category: 'Asset', subCategory: 'Aset Tetap', normalBalance: 'Debit', level: 3, parentCode: '1200', balance: 95000000, isActive: true },
-  { id: '1202', code: '1202', name: 'Kendaraan Operasional', category: 'Asset', subCategory: 'Aset Tetap', normalBalance: 'Debit', level: 3, parentCode: '1200', balance: 240000000, isActive: true },
+  { id: '1101', code: '1101', name: 'Kas Kecil (Petty Cash)', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 0, isActive: true },
+  { id: '1104', code: '1104', name: 'Kas Besar (Main Cash)', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 0, isActive: true },
+  { id: '1102', code: '1102', name: 'Bank BCA Operasional', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 0, isActive: true },
+  { id: '1103', code: '1103', name: 'Bank Mandiri Payroll & Tax', category: 'Asset', subCategory: 'Kas & Bank', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 0, isActive: true },
+  { id: '1120', code: '1120', name: 'Piutang Usaha (Accounts Receivable)', category: 'Asset', subCategory: 'Piutang', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 0, isActive: true },
+  { id: '1130', code: '1130', name: 'Persediaan Barang Dagang / Bahan', category: 'Asset', subCategory: 'Persediaan', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 0, isActive: true },
+  { id: '1140', code: '1140', name: 'Uang Muka Pembelian / Vendor Advance', category: 'Asset', subCategory: 'Uang Muka', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 0, isActive: true },
+  { id: '1150', code: '1150', name: 'Pajak Dibayar di Muka - PPh 22', category: 'Asset', subCategory: 'Pajak Dibayar di Muka', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 0, isActive: true },
+  { id: '1151', code: '1151', name: 'Pajak Dibayar di Muka - PPh 23', category: 'Asset', subCategory: 'Pajak Dibayar di Muka', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 0, isActive: true },
+  { id: '1152', code: '1152', name: 'Pajak Dibayar di Muka - PPh 25 (Angsuran)', category: 'Asset', subCategory: 'Pajak Dibayar di Muka', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 0, isActive: true },
+  { id: '1153', code: '1153', name: 'PPN Masukan (Input VAT)', category: 'Asset', subCategory: 'Pajak Dibayar di Muka', normalBalance: 'Debit', level: 3, parentCode: '1100', balance: 0, isActive: true },
+  { id: '1201', code: '1201', name: 'Peralatan & Server Kantor', category: 'Asset', subCategory: 'Aset Tetap', normalBalance: 'Debit', level: 3, parentCode: '1200', balance: 0, isActive: true },
+  { id: '1202', code: '1202', name: 'Kendaraan Operasional', category: 'Asset', subCategory: 'Aset Tetap', normalBalance: 'Debit', level: 3, parentCode: '1200', balance: 0, isActive: true },
 
   // 2. KEWAJIBAN / LIABILITAS
-  { id: '2101', code: '2101', name: 'Hutang Usaha (Accounts Payable)', category: 'Liability', subCategory: 'Kewajiban Lancar', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 110000000, isActive: true },
-  { id: '2102', code: '2102', name: 'Hutang Gaji & Honorarium', category: 'Liability', subCategory: 'Kewajiban Lancar', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 45000000, isActive: true },
-  { id: '2111', code: '2111', name: 'Hutang Pajak - PPh 21 Karyawan/Ahli', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 8750000, isActive: true },
-  { id: '2112', code: '2112', name: 'Hutang Pajak - PPh 22 Pengadaan', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 3500000, isActive: true },
-  { id: '2113', code: '2113', name: 'Hutang Pajak - PPh 23 Jasa/Sewa', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 6200000, isActive: true },
-  { id: '2114', code: '2114', name: 'Hutang Pajak - PPh 4 Ayat (2) Final', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 14500000, isActive: true },
-  { id: '2115', code: '2115', name: 'Hutang Pajak - PPN Keluaran', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 28000000, isActive: true },
-  { id: '2116', code: '2116', name: 'Hutang Pajak - PPh 25 Angsuran', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 5000000, isActive: true },
+  { id: '2101', code: '2101', name: 'Hutang Usaha (Accounts Payable)', category: 'Liability', subCategory: 'Kewajiban Lancar', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 0, isActive: true },
+  { id: '2102', code: '2102', name: 'Hutang Gaji & Honorarium', category: 'Liability', subCategory: 'Kewajiban Lancar', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 0, isActive: true },
+  { id: '2111', code: '2111', name: 'Hutang Pajak - PPh 21 Karyawan/Ahli', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 0, isActive: true },
+  { id: '2112', code: '2112', name: 'Hutang Pajak - PPh 22 Pengadaan', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 0, isActive: true },
+  { id: '2113', code: '2113', name: 'Hutang Pajak - PPh 23 Jasa/Sewa', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 0, isActive: true },
+  { id: '2114', code: '2114', name: 'Hutang Pajak - PPh 4 Ayat (2) Final', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 0, isActive: true },
+  { id: '2115', code: '2115', name: 'Hutang Pajak - PPN Keluaran', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 0, isActive: true },
+  { id: '2116', code: '2116', name: 'Hutang Pajak - PPh 25 Angsuran', category: 'Liability', subCategory: 'Hutang Pajak', normalBalance: 'Credit', level: 3, parentCode: '2100', balance: 0, isActive: true },
 
   // 3. EKUITAS
-  { id: '3101', code: '3101', name: 'Modal Disetor', category: 'Equity', subCategory: 'Modal', normalBalance: 'Credit', level: 3, parentCode: '3100', balance: 500000000, isActive: true },
-  { id: '3201', code: '3201', name: 'Laba Ditahan (Retained Earnings)', category: 'Equity', subCategory: 'Laba Ditahan', normalBalance: 'Credit', level: 3, parentCode: '3100', balance: 345950000, isActive: true },
+  { id: '3101', code: '3101', name: 'Modal Disetor', category: 'Equity', subCategory: 'Modal', normalBalance: 'Credit', level: 3, parentCode: '3100', balance: 0, isActive: true },
+  { id: '3201', code: '3201', name: 'Laba Ditahan (Retained Earnings)', category: 'Equity', subCategory: 'Laba Ditahan', normalBalance: 'Credit', level: 3, parentCode: '3100', balance: 0, isActive: true },
 
   // 4. PENDAPATAN
-  { id: '4101', code: '4101', name: 'Pendapatan Jasa & Proyek', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Credit', level: 3, parentCode: '4100', balance: 650000000, isActive: true },
-  { id: '4102', code: '4102', name: 'Pendapatan Lisensi & Pemeliharaan', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Credit', level: 3, parentCode: '4100', balance: 180000000, isActive: true },
-  { id: '4-41100', code: '4-41100', name: 'Pendapatan Mitra', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Credit', level: 3, parentCode: '4100', balance: 215000000, isActive: true },
-  { id: '4-40201', code: '4-40201', name: 'Unbilled Revenues / Diskon Penjualan', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Debit', level: 3, parentCode: '4100', balance: 12000000, isActive: true },
+  { id: '4101', code: '4101', name: 'Pendapatan Jasa & Proyek', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Credit', level: 3, parentCode: '4100', balance: 0, isActive: true },
+  { id: '4102', code: '4102', name: 'Pendapatan Lisensi & Pemeliharaan', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Credit', level: 3, parentCode: '4100', balance: 0, isActive: true },
+  { id: '4-41100', code: '4-41100', name: 'Pendapatan Mitra', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Credit', level: 3, parentCode: '4100', balance: 0, isActive: true },
+  { id: '4-40201', code: '4-40201', name: 'Unbilled Revenues / Diskon Penjualan', category: 'Revenue', subCategory: 'Pendapatan Usaha', normalBalance: 'Debit', level: 3, parentCode: '4100', balance: 0, isActive: true },
 
   // 5. BEBAN POKOK PENJUALAN (HPP)
-  { id: '5101', code: '5101', name: 'Beban Subkontraktor & Jasa Ahli Proyek', category: 'Expense', subCategory: 'HPP', normalBalance: 'Debit', level: 3, parentCode: '5100', balance: 140000000, isActive: true },
-  { id: '5102', code: '5102', name: 'Biaya Server Cloud & Lisensi Pihak Ketiga', category: 'Expense', subCategory: 'HPP', normalBalance: 'Debit', level: 3, parentCode: '5100', balance: 48000000, isActive: true },
+  { id: '5101', code: '5101', name: 'Beban Subkontraktor & Jasa Ahli Proyek', category: 'Expense', subCategory: 'HPP', normalBalance: 'Debit', level: 3, parentCode: '5100', balance: 0, isActive: true },
+  { id: '5102', code: '5102', name: 'Biaya Server Cloud & Lisensi Pihak Ketiga', category: 'Expense', subCategory: 'HPP', normalBalance: 'Debit', level: 3, parentCode: '5100', balance: 0, isActive: true },
 
   // 6. BEBAN OPERASIONAL
-  { id: '6101', code: '6101', name: 'Beban Gaji & Tunjangan Karyawan', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 175000000, isActive: true },
-  { id: '6102', code: '6102', name: 'Beban Sewa Gedung & Ruang Kantor', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 85000000, isActive: true },
-  { id: '6103', code: '6103', name: 'Beban Konsultan Hukum, Pajak & Akuntansi', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 35000000, isActive: true },
-  { id: '6104', code: '6104', name: 'Beban Perjalanan Dinas & Transportasi', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 18500000, isActive: true },
-  { id: '6105', code: '6105', name: 'Beban Perlengkapan & ATK Kantor', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 9200000, isActive: true },
-  { id: '6106', code: '6106', name: 'Beban Listrik, Air, & Internet Dedicated', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 14800000, isActive: true },
-  { id: '6107', code: '6107', name: 'Beban Pemeliharaan & Renovasi Kantor', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 22000000, isActive: true }
+  { id: '6101', code: '6101', name: 'Beban Gaji & Tunjangan Karyawan', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 0, isActive: true },
+  { id: '6102', code: '6102', name: 'Beban Sewa Gedung & Ruang Kantor', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 0, isActive: true },
+  { id: '6103', code: '6103', name: 'Beban Konsultan Hukum, Pajak & Akuntansi', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 0, isActive: true },
+  { id: '6104', code: '6104', name: 'Beban Perjalanan Dinas & Transportasi', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 0, isActive: true },
+  { id: '6105', code: '6105', name: 'Beban Perlengkapan & ATK Kantor', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 0, isActive: true },
+  { id: '6106', code: '6106', name: 'Beban Listrik, Air, & Internet Dedicated', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 0, isActive: true },
+  { id: '6107', code: '6107', name: 'Beban Pemeliharaan & Renovasi Kantor', category: 'Expense', subCategory: 'Beban Operasional', normalBalance: 'Debit', level: 3, parentCode: '6100', balance: 0, isActive: true }
 ];
 
 export const INITIAL_VENDORS = [
@@ -176,180 +176,7 @@ export const INITIAL_VENDORS = [
   }
 ];
 
-export const INITIAL_PURCHASE_REQUESTS = [
-  {
-    id: 'pr-1',
-    requestNumber: 'PR-202611-001',
-    requestDate: '2026-11-02',
-    dueDate: '2026-11-15',
-    requesterName: 'Ahmad Fauzi',
-    department: 'IT & Infrastructure',
-    vendorId: 'vnd-1',
-    vendorName: 'PT Cloud Hosting Nusantara',
-    title: 'Perpanjangan Server Cloud AWS & Dedicated Node Q4 2026',
-    description: 'Biaya langganan compute instance, database cluster RDS, dan bandwidth storage cloud periode Nov-Des 2026.',
-    subtotal: 30000000,
-    discount: 0,
-    dpp: 30000000,
-    ppnRate: 11,
-    ppnAmount: 3300000,
-    hasPph: true,
-    pphType: 'PPh 23',
-    pphRate: 2.0,
-    pphAmount: 600000,
-    pphCoaAccount: '2113',
-    totalPayable: 32700000, // DPP (30jt) + PPN (3.3jt) - PPh 23 (600rb)
-    paidAmount: 0,
-    remainingPayable: 32700000,
-    grandTotal: 33300000, // DPP + PPN
-    status: 'Disetujui',
-    approvalDate: '2026-11-03',
-    approvedBy: 'Irfan Hakim (Direktur Keuangan)',
-    coaDebitAccount: '5102', // Biaya Server Cloud
-    coaCreditAccount: '2101', // Hutang Usaha
-    items: [
-      { id: 'item-1-1', description: 'Cloud Server Compute EC2 Multi-AZ', coaId: '5102', qty: 2, unit: 'Bulan', unitPrice: 10000000, taxRate: 11, subtotal: 20000000 },
-      { id: 'item-1-2', description: 'Cloud Relational Database Cluster PostgreSQL', coaId: '5102', qty: 2, unit: 'Bulan', unitPrice: 5000000, taxRate: 11, subtotal: 10000000 }
-    ]
-  },
-  {
-    id: 'pr-2',
-    requestNumber: 'PR-202611-002',
-    requestDate: '2026-11-05',
-    dueDate: '2026-11-19',
-    requesterName: 'Siti Rahmawati',
-    department: 'Finance & Accounting',
-    vendorId: 'vnd-2',
-    vendorName: 'Kantor Konsultan Pajak & Hukum Hendra & Rekan',
-    title: 'Jasa Konsultan Pajak Bulanan & Pendampingan SPT Masa',
-    description: 'Jasa review kepatuhan withholding tax, e-Bupot Unifikasi, dan konsultasi perencanaan pajak perusahaan.',
-    subtotal: 15000000,
-    discount: 0,
-    dpp: 15000000,
-    ppnRate: 11,
-    ppnAmount: 1650000,
-    hasPph: true,
-    pphType: 'PPh 23',
-    pphRate: 2.0,
-    pphAmount: 300000,
-    pphCoaAccount: '2113',
-    totalPayable: 16350000,
-    paidAmount: 0,
-    remainingPayable: 16350000,
-    grandTotal: 16650000,
-    status: 'Disetujui',
-    approvalDate: '2026-11-06',
-    approvedBy: 'Irfan Hakim (Direktur Keuangan)',
-    coaDebitAccount: '6103', // Beban Konsultan Hukum, Pajak & Akuntansi
-    coaCreditAccount: '2101',
-    items: [
-      { id: 'item-2-1', description: 'Retainer Fee Konsultan Pajak Bulan Nov 2026', coaId: '6103', qty: 1, unit: 'Bulan', unitPrice: 15000000, taxRate: 11, subtotal: 15000000 }
-    ]
-  },
-  {
-    id: 'pr-3',
-    requestNumber: 'PR-202611-003',
-    requestDate: '2026-11-13',
-    dueDate: '2026-11-27',
-    requesterName: 'Budi Santoso',
-    department: 'HR & GA',
-    vendorId: 'vnd-5',
-    vendorName: 'CV Sentosa Perkasa Konstruksi',
-    title: 'Beban Pemeliharaan & Renovasi Ruang Kantor',
-    description: 'Pekerjaan perbaikan sekat dan pemeliharaan fasilitas ruang kerja kantor.',
-    subtotal: 22000000,
-    discount: 0,
-    dpp: 22000000,
-    ppnRate: 1.1,
-    ppnAmount: 242000,
-    hasPph: true,
-    pphType: 'PPh 23',
-    pphRate: 2.0,
-    pphAmount: 440000,
-    pphCoaAccount: '2113',
-    totalPayable: 21802000, // 22jt + 242rb - 440rb = 21.802.000
-    paidAmount: 0,
-    remainingPayable: 21802000,
-    grandTotal: 22242000, // DPP (22jt) + PPN (242rb) = 22.242.000
-    status: 'Disetujui',
-    approvalDate: '2026-11-13',
-    approvedBy: 'Irfan Hakim (Direktur Keuangan)',
-    coaDebitAccount: '6107', // Beban Pemeliharaan & Renovasi
-    coaCreditAccount: '2101', // Hutang Usaha
-    items: [
-      { id: 'item-3-1', description: 'Beban Pemeliharaan & Renovasi Ruang Kantor', coaId: '6107', qty: 1, unit: 'Paket', unitPrice: 22000000, taxRate: 1.1, subtotal: 22000000 }
-    ]
-  },
-  {
-    id: 'pr-4',
-    requestNumber: 'PR-202611-004',
-    requestDate: '2026-11-10',
-    dueDate: '2026-11-20',
-    requesterName: 'Diana Putri',
-    department: 'Operations',
-    vendorId: 'vnd-4',
-    vendorName: 'Ir. Bambang Pamungkas, ST (Tenaga Ahli Arsitek)',
-    title: 'Honorarium Desain Layout Ruang Kolaborasi & Meeting Baru',
-    description: 'Imbalan jasa tenaga ahli arsitektur perorangan untuk perancangan dan gambar kerja 3D layout kantor baru.',
-    subtotal: 20000000,
-    discount: 0,
-    dpp: 20000000,
-    ppnRate: 0,
-    ppnAmount: 0,
-    hasPph: true,
-    pphType: 'PPh 21',
-    pphRate: 2.5, // 50% x 5% = 2.5% tenaga ahli
-    pphAmount: 500000,
-    pphCoaAccount: '2111',
-    totalPayable: 19500000, // 20jt - 500rb
-    paidAmount: 0,
-    remainingPayable: 19500000,
-    grandTotal: 20000000,
-    status: 'Menunggu Persetujuan',
-    approvalDate: null,
-    approvedBy: null,
-    coaDebitAccount: '6103',
-    coaCreditAccount: '2102',
-    items: [
-      { id: 'item-4-1', description: 'Jasa Desain Arsitektur & Supervisi Layout 3D', coaId: '6103', qty: 1, unit: 'Paket', unitPrice: 20000000, taxRate: 0, subtotal: 20000000 }
-    ]
-  },
-  {
-    id: 'pr-5',
-    requestNumber: 'PR-202611-005',
-    requestDate: '2026-11-11',
-    dueDate: '2026-11-25',
-    requesterName: 'Budi Santoso',
-    department: 'HR & GA',
-    vendorId: 'vnd-5',
-    vendorName: 'CV Sentosa Perkasa Konstruksi',
-    title: 'Renovasi Sekat Partisi Kaca & Kelistrikan Ruang Server',
-    description: 'Pengerjaan partisi gypsum dan kaca tempered, serta instalasi panel MCB kelistrikan cadangan genset.',
-    subtotal: 35000000,
-    discount: 0,
-    dpp: 35000000,
-    ppnRate: 11,
-    ppnAmount: 3850000,
-    hasPph: true,
-    pphType: 'PPh 4(2)',
-    pphRate: 1.75, // Jasa Konstruksi Kualifikasi Kecil
-    pphAmount: 612500,
-    pphCoaAccount: '2114',
-    totalPayable: 38237500,
-    paidAmount: 0,
-    remainingPayable: 38237500,
-    grandTotal: 38850000,
-    status: 'Menunggu Persetujuan',
-    approvalDate: null,
-    approvedBy: null,
-    coaDebitAccount: '6107', // Beban Pemeliharaan & Renovasi
-    coaCreditAccount: '2101',
-    items: [
-      { id: 'item-5-1', description: 'Pekerjaan Partisi Kaca Tempered 10mm & Pintu Akses', coaId: '6107', qty: 1, unit: 'Paket', unitPrice: 22000000, taxRate: 11, subtotal: 22000000 },
-      { id: 'item-5-2', description: 'Pekerjaan Pengkabelan & Panel Listrik Server', coaId: '6107', qty: 1, unit: 'Paket', unitPrice: 13000000, taxRate: 11, subtotal: 13000000 }
-    ]
-  }
-];
+export const INITIAL_PURCHASE_REQUESTS = [];
 
 export const INITIAL_TAX_RECORDS = [
   {
