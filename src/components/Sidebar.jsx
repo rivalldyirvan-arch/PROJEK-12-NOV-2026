@@ -12,7 +12,8 @@ import {
   UserCheck,
   Shield,
   Building2,
-  Package
+  Package,
+  BookOpen
 } from 'lucide-react';
 import { useAuth } from '../lib/authContext';
 
@@ -31,6 +32,14 @@ export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, 
       label: '1. Modul COA (Akun)', 
       icon: FolderTree,
       badge: stats?.coaCount || 0
+    },
+    { 
+      id: 'journals', 
+      label: 'Jurnal Umum & Periode', 
+      sub: 'Double Entry & Audit',
+      icon: BookOpen,
+      badge: stats?.journalCount || 0,
+      badgeColor: 'bg-indigo-100 text-indigo-800'
     },
     { 
       id: 'vendors', 

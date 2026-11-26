@@ -1,36 +1,50 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   FolderTree, 
   Plus, 
   Search, 
-  Filter, 
   Download, 
   Edit3, 
   Trash2, 
-  Check, 
   X, 
-  Layers,
-  ArrowUpDown,
+  Settings2,
+  CheckCircle2,
+  AlertTriangle,
   BookOpen
 } from 'lucide-react';
 import { formatRupiah } from '../lib/taxRules';
-import { saveCOAAccount, deleteCOAAccount } from '../lib/databaseService';
+import { saveCOAAccount, deleteCOAAccount, saveCoaMapping, recordAuditLog } from '../lib/databaseService';
+import { calculateBalancesFromJournals } from '../lib/accountingService';
+import { useAuth } from '../lib/authContext';
+import SearchableSelect from '../components/SearchableSelect';
 
-const CATEGORIES = ['Semua', 'Asset', 'Liability', 'Equity', 'Revenue', 'Expense'];
+const CATEGORIES = ['Semua', 'Asset', 'Liability', 'Equity', 'Revenue', 'COGS', 'Expense', 'Other Revenue', 'Other Expense'];
 
 const CATEGORY_LABELS = {
-  'Asset': 'Aset / Aktiva',
-  'Liability': 'Kewajiban / Liabilitas',
-  'Equity': 'Ekuitas / Modal',
+  'Asset': 'Aset',
+  'Liability': 'Kewajiban',
+  'Equity': 'Ekuitas',
   'Revenue': 'Pendapatan',
-  'Expense': 'Beban / Biaya'
+  'COGS': 'Harga Pokok Penjualan',
+  'Expense': 'Beban Operasional',
+  'Other Revenue': 'Pendapatan Lain-lain',
+  'Other Expense': 'Beban Lain-lain'
 };
 
-export default function CoaModule({ coaList = [], onRefresh, showToast }) {
+export default function CoaModule({ coaList = [], journalEntries = [], coaMappings = [], onRefresh, showToast }) {
+  const { currentUser } = useAuth();
+  const [activeSubTab, setActiveSubTab] = useState('accounts'); // 'accounts' | 'mappings'
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Semua');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
+  const [savingMappingKey, setSavingMappingKey] = useState(null);
+
+  // Hitung saldo aktual dari jurnal yang sudah diposting
+  const journalBalanceMap = useMemo(
+    () => calculateBalancesFromJournals(coaList, journalEntries),
+    [coaList, journalEntries]
+  );
 
   // Form State
   const [formData, setFormData] = useState({
@@ -44,9 +58,18 @@ export default function CoaModule({ coaList = [], onRefresh, showToast }) {
     isActive: true
   });
 
+  // Helper klasifikasi 8 kelompok termasuk akun 5xxx yang sebelumnya Expense/HPP
+  const getEffectiveCategory = (acc) => {
+    if (acc.category === 'Expense' && (acc.subCategory === 'HPP' || String(acc.code).startsWith('5'))) {
+      return 'COGS';
+    }
+    return acc.category;
+  };
+
   // Filtered List
   const filteredList = coaList.filter((item) => {
-    const matchesCategory = selectedCategory === 'Semua' || item.category === selectedCategory;
+    const effCat = getEffectiveCategory(item);
+    const matchesCategory = selectedCategory === 'Semua' || effCat === selectedCategory;
     const matchesSearch = 
       item.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -54,14 +77,19 @@ export default function CoaModule({ coaList = [], onRefresh, showToast }) {
     return matchesCategory && matchesSearch;
   });
 
-  // Totals
+  // Totals (menggabungkan saldo jurnal terposting jika ada)
+  const getAccountDisplayBalance = (acc) => {
+    const jBal = journalBalanceMap[acc.code]?.netBalance || 0;
+    return (Number(acc.balance) || 0) + jBal;
+  };
+
   const totalDebit = coaList
     .filter(a => a.normalBalance === 'Debit')
-    .reduce((sum, a) => sum + (Number(a.balance) || 0), 0);
+    .reduce((sum, a) => sum + getAccountDisplayBalance(a), 0);
 
   const totalCredit = coaList
     .filter(a => a.normalBalance === 'Credit')
-    .reduce((sum, a) => sum + (Number(a.balance) || 0), 0);
+    .reduce((sum, a) => sum + getAccountDisplayBalance(a), 0);
 
   const handleOpenAdd = () => {
     setEditingAccount(null);
@@ -103,21 +131,59 @@ export default function CoaModule({ coaList = [], onRefresh, showToast }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.code || !formData.name) {
+    const cleanCode = (formData.code || '').trim();
+    const cleanName = (formData.name || '').trim();
+    if (!cleanCode || !cleanName) {
       alert('Kode Akun dan Nama Akun wajib diisi!');
+      return;
+    }
+
+    // Cegah akun duplikat (kode maupun nama identik pada akun baru)
+    const duplicateCode = coaList.find(
+      a => a.code.trim().toLowerCase() === cleanCode.toLowerCase() && (!editingAccount || a.id !== editingAccount.id)
+    );
+    if (duplicateCode) {
+      alert(`Gagal: Kode akun "${cleanCode}" sudah terdaftar (${duplicateCode.name}). Sistem melarang akun duplikat.`);
       return;
     }
 
     const payload = {
       ...formData,
-      id: editingAccount ? editingAccount.id : formData.code,
+      code: cleanCode,
+      name: cleanName,
+      id: editingAccount ? editingAccount.id : cleanCode,
       balance: Number(formData.balance) || 0
     };
 
     await saveCOAAccount(payload);
-    showToast?.(`Akun ${formData.code} berhasil disimpan`, 'success');
+    await recordAuditLog({
+      userId: currentUser?.id || null,
+      userName: currentUser?.fullName || 'Sistem',
+      action: editingAccount ? 'UPDATE_COA' : 'CREATE_COA',
+      entityType: 'coa',
+      entityId: payload.id,
+      referenceNo: payload.code,
+      beforeData: editingAccount ? { name: editingAccount.name, category: editingAccount.category } : null,
+      afterData: { code: payload.code, name: payload.name, category: payload.category },
+      reason: editingAccount ? 'Pembaruan data akun COA' : 'Penambahan akun COA baru'
+    });
+    showToast?.(`Akun ${cleanCode} berhasil disimpan`, 'success');
     setIsModalOpen(false);
     onRefresh();
+  };
+
+  const handleMappingChange = async (mapping, newAccountCode) => {
+    if (!newAccountCode) return;
+    setSavingMappingKey(mapping.mappingKey);
+    try {
+      await saveCoaMapping({ ...mapping, accountCode: newAccountCode }, currentUser);
+      showToast?.(`Pemetaan "${mapping.label}" diperbarui ke akun ${newAccountCode}`, 'success');
+      onRefresh();
+    } catch (err) {
+      showToast?.('Gagal menyimpan pemetaan COA: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setSavingMappingKey(null);
+    }
   };
 
   const handleExportCSV = () => {
@@ -151,7 +217,28 @@ export default function CoaModule({ coaList = [], onRefresh, showToast }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="flex bg-slate-100 p-1 rounded-xl">
+            <button
+              onClick={() => setActiveSubTab('accounts')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition flex items-center gap-1.5 ${
+                activeSubTab === 'accounts' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              <FolderTree className="w-3.5 h-3.5" />
+              Daftar Akun
+            </button>
+            <button
+              onClick={() => setActiveSubTab('mappings')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition flex items-center gap-1.5 ${
+                activeSubTab === 'mappings' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              Pemetaan COA Otomatis
+            </button>
+          </div>
+
           <button
             onClick={handleExportCSV}
             className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center gap-1.5"
@@ -169,6 +256,63 @@ export default function CoaModule({ coaList = [], onRefresh, showToast }) {
           </button>
         </div>
       </div>
+
+      {activeSubTab === 'mappings' ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4 shadow-xs">
+          <div className="flex items-start justify-between border-b border-slate-200 pb-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-emerald-600" />
+                Pengaturan Akun Otomatis Antar Modul
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Menentukan kode akun COA bawaan yang digunakan saat sistem membuat jurnal otomatis dari modul Penjualan, Pembelian, Kas &amp; Bank, Aset Tetap, Pajak, dan Closing.
+              </p>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              {coaMappings.length} Pemetaan Aktif
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {coaMappings.map((m) => {
+              const selectedAcc = coaList.find(c => c.code === m.accountCode);
+              return (
+                <div key={m.mappingKey} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-200 text-slate-700">
+                      {m.moduleGroup}
+                    </span>
+                    {savingMappingKey === m.mappingKey ? (
+                      <span className="text-[10px] text-amber-600 font-semibold">Menyimpan...</span>
+                    ) : (
+                      <span className="text-[10px] text-emerald-700 font-mono font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> {m.accountCode}
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-800">{m.label}</div>
+                    <div className="text-[11px] text-slate-500">{m.description}</div>
+                  </div>
+                  <SearchableSelect
+                    options={coaList.map(c => ({ value: c.code, label: `${c.code} - ${c.name}`, subLabel: c.category }))}
+                    value={m.accountCode}
+                    onChange={(val) => handleMappingChange(m, val)}
+                    placeholder="Pilih akun COA..."
+                  />
+                  {!selectedAcc && (
+                    <div className="text-[10px] text-rose-600 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" /> Akun {m.accountCode} tidak ditemukan di master COA!
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+      <>
 
       {/* Summary Balance Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -248,12 +392,16 @@ export default function CoaModule({ coaList = [], onRefresh, showToast }) {
                 </tr>
               ) : (
                 filteredList.map((acc) => {
+                  const effCategory = getEffectiveCategory(acc);
                   const categoryBadgeColor = {
                     'Asset': 'bg-blue-50 text-blue-700 border-blue-200',
                     'Liability': 'bg-amber-50 text-amber-700 border-amber-200',
                     'Equity': 'bg-purple-50 text-purple-700 border-purple-200',
                     'Revenue': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-                    'Expense': 'bg-rose-50 text-rose-700 border-rose-200'
+                    'COGS': 'bg-orange-50 text-orange-700 border-orange-200',
+                    'Expense': 'bg-rose-50 text-rose-700 border-rose-200',
+                    'Other Revenue': 'bg-teal-50 text-teal-700 border-teal-200',
+                    'Other Expense': 'bg-pink-50 text-pink-700 border-pink-200'
                   };
 
                   return (
@@ -267,8 +415,8 @@ export default function CoaModule({ coaList = [], onRefresh, showToast }) {
                         </span>
                       </td>
                       <td className="py-3 px-4">
-                        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${categoryBadgeColor[acc.category] || 'bg-slate-100 text-slate-700'}`}>
-                          {acc.category}
+                        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${categoryBadgeColor[effCategory] || 'bg-slate-100 text-slate-700'}`}>
+                          {CATEGORY_LABELS[effCategory] || acc.category}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-slate-600">
@@ -282,7 +430,7 @@ export default function CoaModule({ coaList = [], onRefresh, showToast }) {
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-slate-800">
-                        {formatRupiah(acc.balance)}
+                        {formatRupiah(getAccountDisplayBalance(acc))}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${
@@ -317,6 +465,8 @@ export default function CoaModule({ coaList = [], onRefresh, showToast }) {
           </table>
         </div>
       </div>
+      </>
+      )}
 
       {/* Modal Add / Edit COA */}
       {isModalOpen && (
@@ -390,16 +540,19 @@ export default function CoaModule({ coaList = [], onRefresh, showToast }) {
                     value={formData.category}
                     onChange={(e) => {
                       const cat = e.target.value;
-                      const defaultNormal = (cat === 'Asset' || cat === 'Expense') ? 'Debit' : 'Credit';
+                      const defaultNormal = (cat === 'Asset' || cat === 'COGS' || cat === 'Expense' || cat === 'Other Expense') ? 'Debit' : 'Credit';
                       setFormData({ ...formData, category: cat, normalBalance: defaultNormal });
                     }}
                     className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    <option value="Asset">Asset (Aset)</option>
-                    <option value="Liability">Liability (Kewajiban / Hutang)</option>
-                    <option value="Equity">Equity (Modal / Ekuitas)</option>
-                    <option value="Revenue">Revenue (Pendapatan)</option>
-                    <option value="Expense">Expense (Beban / Biaya)</option>
+                    <option value="Asset">Aset (Asset)</option>
+                    <option value="Liability">Kewajiban (Liability)</option>
+                    <option value="Equity">Ekuitas (Equity)</option>
+                    <option value="Revenue">Pendapatan (Revenue)</option>
+                    <option value="COGS">Harga Pokok Penjualan (HPP)</option>
+                    <option value="Expense">Beban Operasional (Expense)</option>
+                    <option value="Other Revenue">Pendapatan Lain-lain</option>
+                    <option value="Other Expense">Beban Lain-lain</option>
                   </select>
                 </div>
 

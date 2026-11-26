@@ -2,6 +2,15 @@ import { getSupabase } from './supabase';
 import { INITIAL_USERS, INITIAL_ROLES } from './initialUsers';
 import { INITIAL_PRODUCTS } from './initialData';
 import { INITIAL_ASSET_CATEGORIES, calculateCommercialDepreciationSchedule, calculateTaxDepreciationSchedule } from './assetCalculator';
+import {
+  DEFAULT_COA_MAPPINGS,
+  DEFAULT_JOURNAL_SEQUENCES,
+  getDefaultPeriods,
+  getPeriodCodeFromDate,
+  validateJournalEntry,
+  buildReversalLines,
+  generateJournalNumber
+} from './accountingService';
 
 const STORAGE_KEYS = {
   COA: 'app_coa_data',
@@ -20,7 +29,11 @@ const STORAGE_KEYS = {
   ASSET_MOVEMENTS: 'app_asset_movements_data',
   ASSET_DISPOSALS: 'app_asset_disposals_data',
   ASSET_POSTINGS: 'app_asset_postings_data',
-  ASSET_AUDIT_LOGS: 'app_asset_audit_logs_data'
+  ASSET_AUDIT_LOGS: 'app_asset_audit_logs_data',
+  ACCOUNTING_PERIODS: 'app_accounting_periods_data',
+  JOURNAL_SEQUENCES: 'app_journal_sequences_data',
+  COA_MAPPINGS: 'app_coa_mappings_data',
+  AUDIT_LOGS: 'app_audit_logs_data'
 };
 
 // Local storage helpers (only for offline / demo mode)
@@ -1213,8 +1226,303 @@ export async function cancelPurchasePayment({
 }
 
 // ==============================================================================
-// 8. MODUL JURNAL UMUM (JOURNAL ENTRIES & GENERAL LEDGER)
+// 8. MODUL JURNAL UMUM, PERIODE AKUNTANSI, PEMETAAN COA & AUDIT TRAIL
 // ==============================================================================
+
+export async function fetchAuditLogs() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200);
+      if (!error && data) {
+        return data.map(item => ({
+          id: item.id,
+          userId: item.user_id,
+          userName: item.user_name,
+          action: item.action,
+          entityType: item.entity_type,
+          entityId: item.entity_id,
+          referenceNo: item.reference_no,
+          beforeData: item.before_data,
+          afterData: item.after_data,
+          reason: item.reason,
+          createdAt: item.created_at
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading audit_logs from Supabase:', err);
+    }
+  }
+  return getLocal(STORAGE_KEYS.AUDIT_LOGS, []);
+}
+
+export async function recordAuditLog({
+  userId = null,
+  userName = 'Sistem',
+  action,
+  entityType,
+  entityId = null,
+  referenceNo = null,
+  beforeData = null,
+  afterData = null,
+  reason = ''
+}) {
+  const logItem = {
+    id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    userId,
+    userName,
+    action,
+    entityType,
+    entityId,
+    referenceNo,
+    beforeData,
+    afterData,
+    reason,
+    createdAt: new Date().toISOString()
+  };
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('audit_logs').insert({
+        id: logItem.id,
+        user_id: logItem.userId,
+        user_name: logItem.userName,
+        action: logItem.action,
+        entity_type: logItem.entityType,
+        entity_id: logItem.entityId,
+        reference_no: logItem.referenceNo,
+        before_data: logItem.beforeData,
+        after_data: logItem.afterData,
+        reason: logItem.reason,
+        created_at: logItem.createdAt
+      });
+    } catch (err) {
+      console.warn('Supabase insert audit_logs error:', err);
+    }
+  }
+
+  const localLogs = getLocal(STORAGE_KEYS.AUDIT_LOGS, []);
+  setLocal(STORAGE_KEYS.AUDIT_LOGS, [logItem, ...localLogs].slice(0, 500));
+  return logItem;
+}
+
+export async function fetchAccountingPeriods() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('accounting_periods').select('*').order('period_code', { ascending: false });
+      if (!error && data && data.length > 0) {
+        return data.map(item => ({
+          id: item.id,
+          periodCode: item.period_code,
+          fiscalYear: item.fiscal_year,
+          periodMonth: item.period_month,
+          periodName: item.period_name,
+          quarter: item.quarter,
+          status: item.status,
+          openedAt: item.opened_at,
+          openedBy: item.opened_by,
+          closedAt: item.closed_at,
+          closedBy: item.closed_by,
+          lockedAt: item.locked_at,
+          lockedBy: item.locked_by,
+          reopenReason: item.reopen_reason,
+          notes: item.notes
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading accounting_periods from Supabase:', err);
+    }
+  }
+  const local = getLocal(STORAGE_KEYS.ACCOUNTING_PERIODS, null);
+  if (!local || local.length === 0) {
+    const defaults = getDefaultPeriods();
+    setLocal(STORAGE_KEYS.ACCOUNTING_PERIODS, defaults);
+    return defaults;
+  }
+  return local;
+}
+
+export async function saveAccountingPeriod(period, currentUser = null, reason = '') {
+  const id = period.id || `per-${period.periodCode}`;
+  const newPeriod = {
+    ...period,
+    id,
+    updatedAt: new Date().toISOString()
+  };
+
+  const localList = getLocal(STORAGE_KEYS.ACCOUNTING_PERIODS, getDefaultPeriods());
+  const prev = localList.find(p => p.id === id || p.periodCode === period.periodCode) || null;
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('accounting_periods').upsert({
+        id: newPeriod.id,
+        period_code: newPeriod.periodCode,
+        fiscal_year: newPeriod.fiscalYear,
+        period_month: newPeriod.periodMonth,
+        period_name: newPeriod.periodName,
+        quarter: newPeriod.quarter,
+        status: newPeriod.status,
+        opened_at: newPeriod.openedAt || null,
+        opened_by: newPeriod.openedBy || null,
+        closed_at: newPeriod.closedAt || null,
+        closed_by: newPeriod.closedBy || null,
+        locked_at: newPeriod.lockedAt || null,
+        locked_by: newPeriod.lockedBy || null,
+        reopen_reason: newPeriod.reopenReason || null,
+        notes: newPeriod.notes || null,
+        updated_at: newPeriod.updatedAt
+      });
+    } catch (err) {
+      console.warn('Supabase upsert accounting_periods error:', err);
+    }
+  }
+
+  const idx = localList.findIndex(p => p.id === id || p.periodCode === period.periodCode);
+  let updated;
+  if (idx >= 0) {
+    updated = [...localList];
+    updated[idx] = newPeriod;
+  } else {
+    updated = [newPeriod, ...localList];
+  }
+  setLocal(STORAGE_KEYS.ACCOUNTING_PERIODS, updated);
+
+  await recordAuditLog({
+    userId: currentUser?.id || null,
+    userName: currentUser?.fullName || 'Sistem',
+    action: `PERIOD_${(newPeriod.status || 'UPDATE').toUpperCase()}`,
+    entityType: 'accounting_periods',
+    entityId: id,
+    referenceNo: newPeriod.periodCode,
+    beforeData: prev ? { status: prev.status } : null,
+    afterData: { status: newPeriod.status },
+    reason: reason || `Perubahan status periode ${newPeriod.periodCode} menjadi ${newPeriod.status}`
+  });
+
+  return newPeriod;
+}
+
+export async function fetchJournalSequences() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('journal_number_sequences').select('*');
+      if (!error && data && data.length > 0) {
+        return data.map(item => ({
+          id: item.id,
+          journalType: item.journal_type,
+          prefix: item.prefix,
+          formatPattern: item.format_pattern,
+          seqDigits: item.seq_digits,
+          lastNumber: item.last_number,
+          resetMonthly: item.reset_monthly !== false
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading journal_number_sequences:', err);
+    }
+  }
+  const local = getLocal(STORAGE_KEYS.JOURNAL_SEQUENCES, null);
+  if (!local || local.length === 0) {
+    setLocal(STORAGE_KEYS.JOURNAL_SEQUENCES, DEFAULT_JOURNAL_SEQUENCES);
+    return DEFAULT_JOURNAL_SEQUENCES;
+  }
+  return local;
+}
+
+export async function saveJournalSequence(seq) {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('journal_number_sequences').upsert({
+        id: seq.id,
+        journal_type: seq.journalType,
+        prefix: seq.prefix,
+        format_pattern: seq.formatPattern,
+        seq_digits: Number(seq.seqDigits) || 4,
+        last_number: Number(seq.lastNumber) || 0,
+        reset_monthly: seq.resetMonthly !== false,
+        updated_at: new Date().toISOString()
+      });
+    } catch (err) {
+      console.warn('Supabase upsert journal_number_sequences error:', err);
+    }
+  }
+  const local = getLocal(STORAGE_KEYS.JOURNAL_SEQUENCES, DEFAULT_JOURNAL_SEQUENCES);
+  const idx = local.findIndex(s => s.id === seq.id || s.journalType === seq.journalType);
+  const updated = idx >= 0 ? local.map((s, i) => (i === idx ? seq : s)) : [...local, seq];
+  setLocal(STORAGE_KEYS.JOURNAL_SEQUENCES, updated);
+  return seq;
+}
+
+export async function fetchCoaMappings() {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('coa_default_mappings').select('*');
+      if (!error && data && data.length > 0) {
+        return data.map(item => ({
+          id: item.id,
+          mappingKey: item.mapping_key,
+          label: item.label,
+          moduleGroup: item.module_group,
+          accountCode: item.account_code,
+          description: item.description
+        }));
+      }
+    } catch (err) {
+      console.warn('Error reading coa_default_mappings:', err);
+    }
+  }
+  const local = getLocal(STORAGE_KEYS.COA_MAPPINGS, null);
+  if (!local || local.length === 0) {
+    setLocal(STORAGE_KEYS.COA_MAPPINGS, DEFAULT_COA_MAPPINGS);
+    return DEFAULT_COA_MAPPINGS;
+  }
+  return local;
+}
+
+export async function saveCoaMapping(mapping, currentUser = null) {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('coa_default_mappings').upsert({
+        id: mapping.id,
+        mapping_key: mapping.mappingKey,
+        label: mapping.label,
+        module_group: mapping.moduleGroup,
+        account_code: mapping.accountCode,
+        description: mapping.description || '',
+        updated_at: new Date().toISOString()
+      });
+    } catch (err) {
+      console.warn('Supabase upsert coa_default_mappings error:', err);
+    }
+  }
+  const local = getLocal(STORAGE_KEYS.COA_MAPPINGS, DEFAULT_COA_MAPPINGS);
+  const prev = local.find(m => m.mappingKey === mapping.mappingKey);
+  const idx = local.findIndex(m => m.mappingKey === mapping.mappingKey || m.id === mapping.id);
+  const updated = idx >= 0 ? local.map((m, i) => (i === idx ? mapping : m)) : [...local, mapping];
+  setLocal(STORAGE_KEYS.COA_MAPPINGS, updated);
+
+  await recordAuditLog({
+    userId: currentUser?.id || null,
+    userName: currentUser?.fullName || 'Admin',
+    action: 'UPDATE_COA_MAPPING',
+    entityType: 'coa_default_mappings',
+    entityId: mapping.id,
+    referenceNo: mapping.mappingKey,
+    beforeData: prev ? { accountCode: prev.accountCode } : null,
+    afterData: { accountCode: mapping.accountCode },
+    reason: `Pemetaan COA ${mapping.label} diubah ke akun ${mapping.accountCode}`
+  });
+
+  return mapping;
+}
 
 export async function fetchJournalEntries() {
   const supabase = getSupabase();
@@ -1226,15 +1534,24 @@ export async function fetchJournalEntries() {
           id: item.id,
           entryNumber: item.entry_number,
           entryDate: item.entry_date,
-          sourceModule: item.source_module,
+          periodCode: item.period_code || getPeriodCodeFromDate(item.entry_date),
+          journalType: item.journal_type || 'Jurnal Umum',
+          sourceModule: item.source_module || 'Manual',
           referenceId: item.reference_id,
           referenceNo: item.reference_no,
           description: item.description,
+          vendorOrCustomer: item.vendor_or_customer || '',
+          department: item.department || '',
+          taxInfo: item.tax_info || {},
+          documentUrl: item.document_url || '',
           totalDebit: Number(item.total_debit || 0),
           totalCredit: Number(item.total_credit || 0),
-          status: item.status,
+          status: item.status || 'Posted',
+          createdBy: item.created_by || item.posted_by || 'Sistem',
+          approvedBy: item.approved_by || '',
           postedBy: item.posted_by,
           postedAt: item.posted_at,
+          reversedFromId: item.reversed_from_id || null,
           lines: item.lines || []
         }));
       }
@@ -1245,41 +1562,126 @@ export async function fetchJournalEntries() {
   return getLocal(STORAGE_KEYS.JOURNAL_ENTRIES, []);
 }
 
-export async function saveJournalEntry(entry) {
+export async function saveJournalEntry(entry, options = {}) {
+  const { currentUser = null, validate = false } = options;
   const supabase = getSupabase();
+  const existingJournals = await fetchJournalEntries();
+  const periods = await fetchAccountingPeriods();
+  const sequences = await fetchJournalSequences();
+
   const id = entry.id || `je-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-  const dateStr = (entry.entryDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
-  const entryNumber = entry.entryNumber || `JV-${dateStr}-${String(Math.floor(100 + Math.random() * 900))}`;
-  
+  const entryDate = entry.entryDate || new Date().toISOString().slice(0, 10);
+  const periodCode = entry.periodCode || getPeriodCodeFromDate(entryDate);
+  const journalType = entry.journalType || 'Jurnal Umum';
+  const targetStatus = entry.status || 'Posted';
+  const entryNumber = entry.entryNumber || generateJournalNumber(journalType, entryDate, existingJournals, sequences);
+
+  const lines = (entry.lines || []).map(l => ({
+    accountCode: l.accountCode,
+    accountName: l.accountName || '',
+    description: l.description || entry.description || '',
+    debit: Number(l.debit) || 0,
+    credit: Number(l.credit) || 0
+  }));
+
+  const totalDebit = lines.reduce((s, l) => s + l.debit, 0);
+  const totalCredit = lines.reduce((s, l) => s + l.credit, 0);
+
+  if (validate || targetStatus === 'Posted') {
+    const check = validateJournalEntry({
+      entry: { ...entry, id, entryDate, periodCode, journalType, entryNumber },
+      lines,
+      periods,
+      existingJournals,
+      targetStatus
+    });
+    if (!check.isValid) {
+      throw new Error(check.errors.join(' '));
+    }
+  }
+
   const newEntry = {
     ...entry,
     id,
     entryNumber,
-    entryDate: entry.entryDate || new Date().toISOString().slice(0, 10),
-    totalDebit: Number(entry.totalDebit || 0),
-    totalCredit: Number(entry.totalCredit || 0),
-    status: entry.status || 'Posted',
-    postedAt: entry.postedAt || new Date().toISOString()
+    entryDate,
+    periodCode,
+    journalType,
+    sourceModule: entry.sourceModule || 'Manual',
+    totalDebit,
+    totalCredit,
+    status: targetStatus,
+    createdBy: entry.createdBy || currentUser?.fullName || entry.postedBy || 'Sistem',
+    postedBy: targetStatus === 'Posted' ? (entry.postedBy || currentUser?.fullName || 'Sistem') : (entry.postedBy || null),
+    postedAt: targetStatus === 'Posted' ? (entry.postedAt || new Date().toISOString()) : null,
+    lines
   };
 
   if (supabase) {
     try {
-      const dbPayload = {
-        id: newEntry.id,
-        entry_number: newEntry.entryNumber,
-        entry_date: newEntry.entryDate,
-        source_module: newEntry.sourceModule || 'Manual',
-        reference_id: newEntry.referenceId || null,
-        reference_no: newEntry.referenceNo || null,
-        description: newEntry.description,
-        total_debit: newEntry.totalDebit,
-        total_credit: newEntry.totalCredit,
-        status: newEntry.status,
-        posted_by: newEntry.postedBy || 'Sistem',
-        posted_at: newEntry.postedAt,
-        lines: newEntry.lines || []
-      };
-      await supabase.from('journal_entries').upsert(dbPayload);
+      if (targetStatus === 'Posted') {
+        const { error: rpcError } = await supabase.rpc('post_journal_entry_atomic', {
+          p_entry: {
+            id: newEntry.id,
+            entry_number: newEntry.entryNumber,
+            entry_date: newEntry.entryDate,
+            period_code: newEntry.periodCode,
+            journal_type: newEntry.journalType,
+            source_module: newEntry.sourceModule,
+            reference_id: newEntry.referenceId || null,
+            reference_no: newEntry.referenceNo || null,
+            description: newEntry.description,
+            vendor_or_customer: newEntry.vendorOrCustomer || null,
+            department: newEntry.department || null,
+            tax_info: newEntry.taxInfo || {},
+            document_url: newEntry.documentUrl || null,
+            created_by: newEntry.createdBy,
+            approved_by: newEntry.approvedBy || newEntry.postedBy,
+            reversed_from_id: newEntry.reversedFromId || null
+          },
+          p_lines: lines,
+          p_user_name: newEntry.postedBy || 'Sistem'
+        });
+
+        if (rpcError) {
+          // Fallback upsert langsung jika RPC belum di-deploy ke Supabase
+          console.warn('RPC post_journal_entry_atomic fallback:', rpcError.message);
+          await supabase.from('journal_entries').upsert({
+            id: newEntry.id,
+            entry_number: newEntry.entryNumber,
+            entry_date: newEntry.entryDate,
+            source_module: newEntry.sourceModule,
+            reference_id: newEntry.referenceId || null,
+            reference_no: newEntry.referenceNo || null,
+            description: newEntry.description,
+            total_debit: newEntry.totalDebit,
+            total_credit: newEntry.totalCredit,
+            status: newEntry.status,
+            posted_by: newEntry.postedBy || 'Sistem',
+            posted_at: newEntry.postedAt,
+            lines: newEntry.lines
+          });
+        }
+      } else {
+        await supabase.from('journal_entries').upsert({
+          id: newEntry.id,
+          entry_number: newEntry.entryNumber,
+          entry_date: newEntry.entryDate,
+          period_code: newEntry.periodCode,
+          journal_type: newEntry.journalType,
+          source_module: newEntry.sourceModule,
+          reference_id: newEntry.referenceId || null,
+          reference_no: newEntry.referenceNo || null,
+          description: newEntry.description,
+          vendor_or_customer: newEntry.vendorOrCustomer || null,
+          department: newEntry.department || null,
+          total_debit: newEntry.totalDebit,
+          total_credit: newEntry.totalCredit,
+          status: newEntry.status,
+          created_by: newEntry.createdBy,
+          lines: newEntry.lines
+        });
+      }
     } catch (err) {
       console.warn('Supabase upsert journal error:', err);
     }
@@ -1295,7 +1697,110 @@ export async function saveJournalEntry(entry) {
     updated = [newEntry, ...localList];
   }
   setLocal(STORAGE_KEYS.JOURNAL_ENTRIES, updated);
+
+  await recordAuditLog({
+    userId: currentUser?.id || null,
+    userName: currentUser?.fullName || newEntry.postedBy || 'Sistem',
+    action: targetStatus === 'Posted' ? 'POST_JOURNAL' : 'SAVE_JOURNAL_DRAFT',
+    entityType: 'journal_entries',
+    entityId: newEntry.id,
+    referenceNo: newEntry.entryNumber,
+    afterData: { status: newEntry.status, totalDebit, totalCredit, periodCode },
+    reason: newEntry.description
+  });
+
   return newEntry;
+}
+
+export async function reverseJournalEntry(originalEntry, reason = '', currentUser = null) {
+  if (!originalEntry || originalEntry.status !== 'Posted') {
+    throw new Error('Hanya jurnal berstatus Posted yang dapat dibuatkan Jurnal Pembalik.');
+  }
+  if (!reason.trim()) {
+    throw new Error('Alasan pembalikan jurnal wajib diisi untuk keperluan Audit Trail.');
+  }
+
+  const periods = await fetchAccountingPeriods();
+  const today = new Date().toISOString().slice(0, 10);
+  const periodCode = getPeriodCodeFromDate(today);
+  const periodObj = periods.find(p => p.periodCode === periodCode);
+  if (periodObj && (periodObj.status === 'Closed' || periodObj.status === 'Locked')) {
+    throw new Error(`Periode ${periodCode} sudah ${periodObj.status}. Tidak dapat membuat jurnal pembalik pada periode terkunci.`);
+  }
+
+  const reversalLines = buildReversalLines(originalEntry.lines || []);
+  const reversalEntry = await saveJournalEntry({
+    entryDate: today,
+    periodCode,
+    journalType: 'Jurnal Pembalik',
+    sourceModule: originalEntry.sourceModule || 'Manual',
+    referenceId: originalEntry.id,
+    referenceNo: `REV-${originalEntry.entryNumber}`,
+    description: `Jurnal Pembalik atas ${originalEntry.entryNumber} — Alasan: ${reason}`,
+    vendorOrCustomer: originalEntry.vendorOrCustomer || '',
+    department: originalEntry.department || '',
+    status: 'Posted',
+    reversedFromId: originalEntry.id,
+    lines: reversalLines
+  }, { currentUser, validate: true });
+
+  // Tandai jurnal asli sebagai Reversed
+  const updatedOriginal = { ...originalEntry, status: 'Reversed' };
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('journal_entries').update({ status: 'Reversed', updated_at: new Date().toISOString() }).eq('id', originalEntry.id);
+    } catch (err) {
+      console.warn('Supabase mark Reversed error:', err);
+    }
+  }
+  const localList = getLocal(STORAGE_KEYS.JOURNAL_ENTRIES, []);
+  setLocal(STORAGE_KEYS.JOURNAL_ENTRIES, localList.map(j => (j.id === originalEntry.id ? updatedOriginal : j)));
+
+  await recordAuditLog({
+    userId: currentUser?.id || null,
+    userName: currentUser?.fullName || 'Sistem',
+    action: 'REVERSE_JOURNAL',
+    entityType: 'journal_entries',
+    entityId: originalEntry.id,
+    referenceNo: originalEntry.entryNumber,
+    beforeData: { status: 'Posted' },
+    afterData: { status: 'Reversed', reversalEntryNumber: reversalEntry.entryNumber },
+    reason
+  });
+
+  return reversalEntry;
+}
+
+export async function deleteDraftJournalEntry(entry, currentUser = null) {
+  if (!entry || entry.status === 'Posted' || entry.status === 'Reversed') {
+    throw new Error('Jurnal yang sudah diposting tidak boleh dihapus langsung! Gunakan Jurnal Pembalik.');
+  }
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase.from('journal_entries').delete().eq('id', entry.id);
+    } catch (err) {
+      console.warn('Supabase delete draft journal error:', err);
+    }
+  }
+
+  const localList = getLocal(STORAGE_KEYS.JOURNAL_ENTRIES, []);
+  setLocal(STORAGE_KEYS.JOURNAL_ENTRIES, localList.filter(j => j.id !== entry.id));
+
+  await recordAuditLog({
+    userId: currentUser?.id || null,
+    userName: currentUser?.fullName || 'Sistem',
+    action: 'DELETE_DRAFT_JOURNAL',
+    entityType: 'journal_entries',
+    entityId: entry.id,
+    referenceNo: entry.entryNumber,
+    beforeData: { status: entry.status, description: entry.description },
+    reason: 'Penghapusan draft jurnal'
+  });
+
+  return true;
 }
 
 // ==============================================================================

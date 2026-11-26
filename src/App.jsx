@@ -12,6 +12,7 @@ import TaxCalculatorTab from './pages/TaxCalculatorTab';
 import UserModule from './pages/UserModule';
 import AssetModule from './pages/AssetModule';
 import ProductModule from './pages/ProductModule';
+import JournalModule from './pages/JournalModule';
 import LoginPage from './pages/LoginPage';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { 
@@ -23,6 +24,10 @@ import {
   fetchFixedAssets,
   fetchAssetCategories,
   fetchJournalEntries,
+  fetchAccountingPeriods,
+  fetchJournalSequences,
+  fetchCoaMappings,
+  fetchAuditLogs,
   fetchAssetPostings,
   fetchAssetMovements,
   fetchAssetDisposals,
@@ -44,10 +49,14 @@ function MainAppContent() {
   const [purchaseRequests, setPurchaseRequests] = useState([]);
   const [taxRecords, setTaxRecords] = useState([]);
   
-  // Fixed Asset Lists
+  // Fixed Asset & Accounting Core Lists
   const [assetList, setAssetList] = useState([]);
   const [assetCategoryList, setAssetCategoryList] = useState([]);
   const [journalEntriesList, setJournalEntriesList] = useState([]);
+  const [accountingPeriods, setAccountingPeriods] = useState([]);
+  const [journalSequences, setJournalSequences] = useState([]);
+  const [coaMappings, setCoaMappings] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
   const [assetPostingsList, setAssetPostingsList] = useState([]);
   const [assetMovementsList, setAssetMovementsList] = useState([]);
   const [assetDisposalsList, setAssetDisposalsList] = useState([]);
@@ -62,7 +71,7 @@ function MainAppContent() {
       setLoading(true);
     }
     try {
-      const [coa, vendors, products, purchases, taxes, assets, categories, journals, postings, movements, disposals, conn] = await Promise.all([
+      const [coa, vendors, products, purchases, taxes, assets, categories, journals, periods, sequences, mappings, audits, postings, movements, disposals, conn] = await Promise.all([
         fetchCOA(),
         fetchVendors(),
         fetchProducts(),
@@ -71,6 +80,10 @@ function MainAppContent() {
         fetchFixedAssets(),
         fetchAssetCategories(),
         fetchJournalEntries(),
+        fetchAccountingPeriods(),
+        fetchJournalSequences(),
+        fetchCoaMappings(),
+        fetchAuditLogs(),
         fetchAssetPostings(),
         fetchAssetMovements(),
         fetchAssetDisposals(),
@@ -85,6 +98,10 @@ function MainAppContent() {
       setAssetList(assets || []);
       setAssetCategoryList(categories || []);
       setJournalEntriesList(journals || []);
+      setAccountingPeriods(periods || []);
+      setJournalSequences(sequences || []);
+      setCoaMappings(mappings || []);
+      setAuditLogs(audits || []);
       setAssetPostingsList(postings || []);
       setAssetMovementsList(movements || []);
       setAssetDisposalsList(disposals || []);
@@ -124,6 +141,7 @@ function MainAppContent() {
   // Sidebar stats
   const stats = {
     coaCount: coaList.length,
+    journalCount: journalEntriesList.filter(j => j.status === 'Posted').length,
     vendorCount: vendorList.length,
     productCount: productList.length,
     pendingPrCount: purchaseRequests.filter(p => p.status === 'Menunggu Persetujuan').length,
@@ -174,6 +192,20 @@ function MainAppContent() {
               {activeTab === 'coa' && (
                 <CoaModule 
                   coaList={coaList}
+                  journalEntries={journalEntriesList}
+                  coaMappings={coaMappings}
+                  onRefresh={loadData}
+                  showToast={showToast}
+                />
+              )}
+
+              {activeTab === 'journals' && (
+                <JournalModule 
+                  journalEntries={journalEntriesList}
+                  coaList={coaList}
+                  accountingPeriods={accountingPeriods}
+                  journalSequences={journalSequences}
+                  auditLogs={auditLogs}
                   onRefresh={loadData}
                   showToast={showToast}
                 />
