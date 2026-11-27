@@ -20,6 +20,7 @@ import SalesModule from './pages/SalesModule';
 import ExpenseCashBankModule from './pages/ExpenseCashBankModule';
 import AdjustingClosingModule from './pages/AdjustingClosingModule';
 import FinancialStatementsModule from './pages/FinancialStatementsModule';
+import SystemValidationModule from './pages/SystemValidationModule';
 import LoginPage from './pages/LoginPage';
 import { AuthProvider, useAuth } from './lib/authContext';
 import { 
@@ -212,6 +213,7 @@ function MainAppContent() {
                   vendorList={vendorList}
                   purchaseRequests={purchaseRequests}
                   taxRecords={taxRecords}
+                  journalEntries={journalEntriesList}
                   onNavigate={setActiveTab}
                   onRefresh={loadData}
                   showToast={showToast}
@@ -275,6 +277,14 @@ function MainAppContent() {
 
               {activeTab === 'financial-statements' && (
                 <FinancialStatementsModule
+                  coaList={coaList}
+                  journalEntries={journalEntriesList}
+                  showToast={showToast}
+                />
+              )}
+
+              {activeTab === 'system-validation' && (
+                <SystemValidationModule
                   coaList={coaList}
                   journalEntries={journalEntriesList}
                   showToast={showToast}

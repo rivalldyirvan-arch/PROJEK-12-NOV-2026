@@ -20,7 +20,8 @@ import {
   TrendingUp,
   Wallet,
   SlidersHorizontal,
-  BarChart3
+  BarChart3,
+  ShieldCheck
 } from 'lucide-react';
 import { useAuth } from '../lib/authContext';
 
@@ -72,6 +73,13 @@ export default function Sidebar({ activeTab, setActiveTab, onOpenSupabaseModal, 
       sub: 'L/R · Neraca · Arus Kas · Rasio',
       icon: BarChart3,
       badgeColor: 'bg-purple-100 text-purple-800'
+    },
+    { 
+      id: 'system-validation', 
+      label: 'Validasi Sistem (10 Tes)', 
+      sub: 'Uji Integritas SAK',
+      icon: ShieldCheck,
+      badgeColor: 'bg-emerald-100 text-emerald-800'
     },
     { 
       id: 'vendors', 

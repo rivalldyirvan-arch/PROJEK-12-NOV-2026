@@ -888,3 +888,4 @@ export default function FinancialStatementsModule({ coaList = [], journalEntries
     </div>
   );
 }
+

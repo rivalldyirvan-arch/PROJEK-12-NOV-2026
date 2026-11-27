@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronUp,
   TrendingUp,
+  TrendingDown,
   FileCheck2,
   X,
   Layers,
@@ -24,22 +25,56 @@ import {
   Filter,
   CreditCard,
   AlertTriangle,
-  Lock
+  Lock,
+  BarChart3,
+  Activity,
+  ShieldCheck,
+  BookOpen
 } from 'lucide-react';
 import { formatRupiah, formatDateIndo } from '../lib/taxRules';
 import { executePurchasePayment, getVendorDeposit } from '../lib/databaseService';
 import { useAuth } from '../lib/authContext';
+import {
+  buildIncomeStatement,
+  buildBalanceSheet,
+  buildTrialBalance,
+  isEffectivePostedStatus
+} from '../lib/accountingService';
 
 export default function Dashboard({ 
   coaList = [], 
   vendorList = [], 
   purchaseRequests = [], 
   taxRecords = [],
+  journalEntries = [],
   onNavigate,
   onRefresh,
   showToast
 }) {
   const { currentUser, hasPermission } = useAuth();
+
+  // ── KPI Akuntansi dari Jurnal Aktual ──────────────────────────────────
+  const startDate = `${new Date().getFullYear()}-01-01`;
+  const endDate = new Date().toISOString().slice(0, 10);
+
+  const incomeStatement = useMemo(() =>
+    buildIncomeStatement({ coaList, journalEntries, startDate, endDate }),
+    [coaList, journalEntries, startDate, endDate]
+  );
+
+  const balanceSheet = useMemo(() =>
+    buildBalanceSheet({ coaList, journalEntries, asOfDate: endDate }),
+    [coaList, journalEntries, endDate]
+  );
+
+  const trialBalance = useMemo(() =>
+    buildTrialBalance({ coaList, journalEntries, startDate, endDate }),
+    [coaList, journalEntries, startDate, endDate]
+  );
+
+  const postedJournalCount = journalEntries.filter(j => isEffectivePostedStatus(j.status)).length;
+  const draftJournalCount = journalEntries.filter(j => j.status === 'Draft').length;
+  const pendingApprovalCount = journalEntries.filter(j => j.status === 'Menunggu Persetujuan').length;
 
   // 1. Hitung Kas & Bank (COA subCategory 'Kas & Bank')
   const totalKasBank = coaList
@@ -472,6 +507,68 @@ export default function Dashboard({
               <Clock className="w-3.5 h-3.5 text-amber-500" />
               <span>Jatuh tempo tgl 15 bulan ini</span>
             </p>
+          </div>
+        </div>
+      </div>
+
+      {/* KPI Siklus Akuntansi Real-Time (dari Jurnal Aktual) */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+              <BarChart3 className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">Kinerja Akuntansi Tahun Berjalan (YTD)</h3>
+              <p className="text-xs text-slate-500">Dihitung real-time dari {postedJournalCount} jurnal efektif · {draftJournalCount} draft · {pendingApprovalCount} menunggu persetujuan</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onNavigate('financial-statements')}
+              className="text-xs px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-semibold flex items-center gap-1 transition"
+            >
+              <BarChart3 className="w-3.5 h-3.5" /> Laporan Keuangan
+            </button>
+            <button
+              onClick={() => onNavigate('system-validation')}
+              className="text-xs px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 font-semibold flex items-center gap-1 transition"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" /> Validasi 10 Tes
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
+          <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-100">
+            <div className="text-[11px] font-semibold text-blue-700 uppercase">Pendapatan (YTD)</div>
+            <div className="text-lg font-extrabold text-slate-900 mt-1">{formatRupiah(incomeStatement.totalRevenue)}</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">Gross Margin: {incomeStatement.grossProfitMargin.toFixed(1)}%</div>
+          </div>
+          <div className={`p-3.5 rounded-xl border ${incomeStatement.isProfit ? 'bg-emerald-50/70 border-emerald-100' : 'bg-red-50/70 border-red-100'}`}>
+            <div className={`text-[11px] font-semibold uppercase ${incomeStatement.isProfit ? 'text-emerald-700' : 'text-red-700'}`}>
+              {incomeStatement.isProfit ? 'Laba Bersih (YTD)' : 'Rugi Bersih (YTD)'}
+            </div>
+            <div className={`text-lg font-extrabold mt-1 ${incomeStatement.isProfit ? 'text-emerald-800' : 'text-red-700'}`}>
+              {formatRupiah(incomeStatement.netProfit)}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5">Net Margin: {incomeStatement.netProfitMargin.toFixed(1)}%</div>
+          </div>
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70">
+            <div className="text-[11px] font-semibold text-slate-600 uppercase">Total Aset (Neraca)</div>
+            <div className="text-lg font-extrabold text-slate-900 mt-1">{formatRupiah(balanceSheet.totalAssets)}</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">Ekuitas: {formatRupiah(balanceSheet.totalEquity)}</div>
+          </div>
+          <div className={`p-3.5 rounded-xl border ${trialBalance.isBalanced && balanceSheet.isBalanced ? 'bg-emerald-50/70 border-emerald-200' : 'bg-amber-50/70 border-amber-200'}`}>
+            <div className="text-[11px] font-semibold text-slate-600 uppercase">Status Keseimbangan</div>
+            <div className={`text-sm font-extrabold mt-1.5 flex items-center gap-1.5 ${trialBalance.isBalanced && balanceSheet.isBalanced ? 'text-emerald-700' : 'text-amber-700'}`}>
+              {trialBalance.isBalanced && balanceSheet.isBalanced ? (
+                <><CheckCircle className="w-4 h-4" /> Seimbang (D = K)</>
+              ) : (
+                <><AlertTriangle className="w-4 h-4" /> Perlu Pengecekan</>
+              )}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1">Neraca Saldo: {formatRupiah(trialBalance.totalEndDebit)}</div>
           </div>
         </div>
       </div>
