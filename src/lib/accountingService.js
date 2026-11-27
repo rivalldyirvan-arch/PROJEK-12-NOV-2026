@@ -1238,3 +1238,157 @@ export function calculateFinancialRatios({
     avgEquity
   };
 }
+
+// ----------------------------------------------------------------
+// F. PERBANDINGAN ANTAR PERIODE & TREN KUARTALAN
+// ----------------------------------------------------------------
+
+/**
+ * Hitung perubahan (selisih Rp dan persentase %) antara dua nilai.
+ */
+function calcVariance(currentVal, priorVal) {
+  const cur = Number(currentVal) || 0;
+  const pri = Number(priorVal) || 0;
+  const diff = cur - pri;
+  const pct = pri !== 0 ? (diff / Math.abs(pri)) * 100 : (cur !== 0 ? 100 : 0);
+  return { current: cur, prior: pri, diff, pct };
+}
+
+/**
+ * Gabungkan baris akun periode berjalan dan periode pembanding.
+ */
+function mergeComparativeRows(currentRows = [], priorRows = [], valueKey = 'amount') {
+  const map = new Map();
+  currentRows.forEach(r => {
+    map.set(r.code, {
+      code: r.code,
+      name: r.name,
+      category: r.category,
+      current: r[valueKey] || 0,
+      prior: 0
+    });
+  });
+  priorRows.forEach(r => {
+    if (map.has(r.code)) {
+      map.get(r.code).prior = r[valueKey] || 0;
+    } else {
+      map.set(r.code, {
+        code: r.code,
+        name: r.name,
+        category: r.category,
+        current: 0,
+        prior: r[valueKey] || 0
+      });
+    }
+  });
+  return Array.from(map.values())
+    .sort((a, b) => a.code.localeCompare(b.code))
+    .map(item => ({ ...item, ...calcVariance(item.current, item.prior) }));
+}
+
+/**
+ * Susun Laporan Laba Rugi Komparatif (Periode Berjalan vs Periode Pembanding).
+ */
+export function buildComparativeIncomeStatement({
+  coaList = [],
+  journalEntries = [],
+  currentStart = '',
+  currentEnd = '',
+  priorStart = '',
+  priorEnd = ''
+}) {
+  const current = buildIncomeStatement({ coaList, journalEntries, startDate: currentStart, endDate: currentEnd });
+  const prior = buildIncomeStatement({ coaList, journalEntries, startDate: priorStart, endDate: priorEnd });
+
+  return {
+    current,
+    prior,
+    revenueRows: mergeComparativeRows(current.revenueRows, prior.revenueRows, 'amount'),
+    cogsRows: mergeComparativeRows(current.cogsRows, prior.cogsRows, 'amount'),
+    expenseRows: mergeComparativeRows(current.expenseRows, prior.expenseRows, 'amount'),
+    otherRevenueRows: mergeComparativeRows(current.otherRevenueRows, prior.otherRevenueRows, 'amount'),
+    otherExpenseRows: mergeComparativeRows(current.otherExpenseRows, prior.otherExpenseRows, 'amount'),
+    summary: {
+      totalRevenue: calcVariance(current.totalRevenue, prior.totalRevenue),
+      totalCOGS: calcVariance(current.totalCOGS, prior.totalCOGS),
+      grossProfit: calcVariance(current.grossProfit, prior.grossProfit),
+      totalExpense: calcVariance(current.totalExpense, prior.totalExpense),
+      operatingProfit: calcVariance(current.operatingProfit, prior.operatingProfit),
+      profitBeforeTax: calcVariance(current.profitBeforeTax, prior.profitBeforeTax),
+      totalTax: calcVariance(current.totalTax, prior.totalTax),
+      netProfit: calcVariance(current.netProfit, prior.netProfit)
+    }
+  };
+}
+
+/**
+ * Susun Neraca Komparatif (Tanggal Berjalan vs Tanggal Pembanding).
+ */
+export function buildComparativeBalanceSheet({
+  coaList = [],
+  journalEntries = [],
+  currentAsOf = '',
+  priorAsOf = ''
+}) {
+  const current = buildBalanceSheet({ coaList, journalEntries, asOfDate: currentAsOf });
+  const prior = buildBalanceSheet({ coaList, journalEntries, asOfDate: priorAsOf });
+
+  return {
+    current,
+    prior,
+    currentAssetRows: mergeComparativeRows(current.currentAssetRows, prior.currentAssetRows, 'balance'),
+    fixedAssetRows: mergeComparativeRows(current.fixedAssetRows, prior.fixedAssetRows, 'balance'),
+    currentLiabilityRows: mergeComparativeRows(current.currentLiabilityRows, prior.currentLiabilityRows, 'balance'),
+    longTermLiabilityRows: mergeComparativeRows(current.longTermLiabilityRows, prior.longTermLiabilityRows, 'balance'),
+    equityRows: mergeComparativeRows(current.equityRows, prior.equityRows, 'balance'),
+    summary: {
+      totalCurrentAssets: calcVariance(current.totalCurrentAssets, prior.totalCurrentAssets),
+      totalFixedAssets: calcVariance(current.totalFixedAssets, prior.totalFixedAssets),
+      totalAssets: calcVariance(current.totalAssets, prior.totalAssets),
+      totalCurrentLiabilities: calcVariance(current.totalCurrentLiabilities, prior.totalCurrentLiabilities),
+      totalLongTermLiabilities: calcVariance(current.totalLongTermLiabilities, prior.totalLongTermLiabilities),
+      totalLiabilities: calcVariance(current.totalLiabilities, prior.totalLiabilities),
+      totalEquity: calcVariance(current.totalEquity, prior.totalEquity),
+      totalLiabilitiesAndEquity: calcVariance(current.totalLiabilitiesAndEquity, prior.totalLiabilitiesAndEquity)
+    }
+  };
+}
+
+/**
+ * Hitung tren keuangan & rasio per kuartal (Q1–Q4) untuk tahun tertentu.
+ */
+export function buildQuarterlyTrend({ coaList = [], journalEntries = [], year }) {
+  const y = Number(year) || new Date().getFullYear();
+  const quarters = [
+    { label: `Q1 ${y}`, short: 'Q1', start: `${y}-01-01`, end: `${y}-03-31`, priorEnd: `${y - 1}-12-31` },
+    { label: `Q2 ${y}`, short: 'Q2', start: `${y}-04-01`, end: `${y}-06-30`, priorEnd: `${y}-03-31` },
+    { label: `Q3 ${y}`, short: 'Q3', start: `${y}-07-01`, end: `${y}-09-30`, priorEnd: `${y}-06-30` },
+    { label: `Q4 ${y}`, short: 'Q4', start: `${y}-10-01`, end: `${y}-12-31`, priorEnd: `${y}-09-30` }
+  ];
+
+  return quarters.map(q => {
+    const is = buildIncomeStatement({ coaList, journalEntries, startDate: q.start, endDate: q.end });
+    const ratios = calculateFinancialRatios({
+      coaList,
+      journalEntries,
+      startDate: q.start,
+      endDate: q.end,
+      priorEndDate: q.priorEnd
+    });
+
+    return {
+      label: q.label,
+      short: q.short,
+      startDate: q.start,
+      endDate: q.end,
+      revenue: is.totalRevenue,
+      expense: is.totalCOGS + is.totalExpense + is.totalOtherExpense,
+      netProfit: is.netProfit,
+      grossProfitMargin: ratios.grossProfitMargin ?? 0,
+      netProfitMargin: ratios.netProfitMargin ?? 0,
+      currentRatio: ratios.currentRatio ?? 0,
+      roe: ratios.roe ?? 0,
+      totalAssets: ratios.bs?.totalAssets || 0
+    };
+  });
+}

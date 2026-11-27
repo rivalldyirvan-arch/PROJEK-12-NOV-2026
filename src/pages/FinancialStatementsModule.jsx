@@ -11,6 +11,9 @@ import {
   buildEquityStatement,
   buildCashFlowStatement,
   calculateFinancialRatios,
+  buildComparativeIncomeStatement,
+  buildComparativeBalanceSheet,
+  buildQuarterlyTrend,
   formatPeriodName
 } from '../lib/accountingService';
 
@@ -120,6 +123,167 @@ function RatioRow({ label, value, display, good, warn, interpretation }) {
   );
 }
 
+// Variance badge & row untuk mode perbandingan
+function VarianceCell({ diff, pct, invertColor = false }) {
+  const isPositive = diff >= 0;
+  const isGood = invertColor ? !isPositive : isPositive;
+  const color = diff === 0 ? 'text-slate-400' : isGood ? 'text-emerald-700' : 'text-red-600';
+  return (
+    <>
+      <td className={`py-1.5 text-xs text-right pr-3 font-mono ${color}`}>
+        {diff > 0 ? `+${fmtRp(diff)}` : fmtRp(diff)}
+      </td>
+      <td className={`py-1.5 text-[11px] text-right pr-4 font-mono font-semibold ${color}`}>
+        {pct > 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`}
+      </td>
+    </>
+  );
+}
+
+function CompLRRow({ label, v, indent = 0, bold = false, border = false, highlight = false, invertColor = false }) {
+  return (
+    <tr className={`${highlight ? 'bg-emerald-50' : ''} ${border ? 'border-t-2 border-slate-300' : ''}`}>
+      <td className={`py-1.5 text-xs text-slate-700 ${bold ? 'font-bold' : ''}`} style={{ paddingLeft: `${(indent * 16) + 12}px` }}>
+        {label}
+      </td>
+      <td className={`py-1.5 text-xs text-right pr-3 font-mono ${bold ? 'font-bold text-slate-900' : 'text-slate-800'}`}>
+        {fmtRp(v?.current)}
+      </td>
+      <td className={`py-1.5 text-xs text-right pr-3 font-mono ${bold ? 'font-bold text-slate-600' : 'text-slate-500'}`}>
+        {fmtRp(v?.prior)}
+      </td>
+      <VarianceCell diff={v?.diff || 0} pct={v?.pct || 0} invertColor={invertColor} />
+    </tr>
+  );
+}
+
+// Grafik batang SVG tren kuartalan (Pendapatan vs Beban vs Laba Bersih)
+function QuarterlyBarChart({ data = [] }) {
+  const maxVal = Math.max(
+    1,
+    ...data.flatMap(d => [Math.abs(d.revenue), Math.abs(d.expense), Math.abs(d.netProfit)])
+  );
+  const chartH = 160;
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h4 className="text-xs font-bold text-slate-800">Tren Kinerja Keuangan per Kuartal</h4>
+          <p className="text-[11px] text-slate-400">Pendapatan, Beban, dan Laba Bersih (Q1–Q4)</p>
+        </div>
+        <div className="flex items-center gap-3 text-[10px] font-semibold">
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" /> Pendapatan</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500 inline-block" /> Beban</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> Laba Bersih</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-4 gap-4 items-end pt-4 border-b border-slate-200 pb-2" style={{ height: `${chartH + 40}px` }}>
+        {data.map(q => {
+          const revH = Math.max(2, Math.round((Math.abs(q.revenue) / maxVal) * chartH));
+          const expH = Math.max(2, Math.round((Math.abs(q.expense) / maxVal) * chartH));
+          const netH = Math.max(2, Math.round((Math.abs(q.netProfit) / maxVal) * chartH));
+          return (
+            <div key={q.label} className="flex flex-col items-center gap-1.5">
+              <div className="flex items-end gap-1.5 h-[160px]">
+                <div title={`Pendapatan ${q.label}: ${fmtRp(q.revenue)}`}
+                  className="w-5 bg-blue-500 rounded-t transition-all hover:bg-blue-600" style={{ height: `${revH}px` }} />
+                <div title={`Beban ${q.label}: ${fmtRp(q.expense)}`}
+                  className="w-5 bg-amber-500 rounded-t transition-all hover:bg-amber-600" style={{ height: `${expH}px` }} />
+                <div title={`Laba Bersih ${q.label}: ${fmtRp(q.netProfit)}`}
+                  className={`w-5 rounded-t transition-all ${q.netProfit >= 0 ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-red-500 hover:bg-red-600'}`}
+                  style={{ height: `${netH}px` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="grid grid-cols-4 gap-4 pt-2 text-center">
+        {data.map(q => (
+          <div key={q.label}>
+            <div className="text-xs font-bold text-slate-700">{q.short}</div>
+            <div className="text-[10px] text-slate-500 font-mono">{fmtRp(q.netProfit)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Grafik garis SVG tren margin & ROE per kuartal
+function RatioTrendChart({ data = [] }) {
+  const w = 360;
+  const h = 140;
+  const padX = 36;
+  const padY = 18;
+  const allVals = data.flatMap(d => [d.grossProfitMargin, d.netProfitMargin, d.roe]);
+  const minV = Math.min(0, ...allVals);
+  const maxV = Math.max(20, ...allVals);
+  const span = Math.max(1, maxV - minV);
+
+  const toPoints = (key) =>
+    data.map((d, i) => {
+      const x = padX + (i * (w - padX * 2)) / Math.max(1, data.length - 1);
+      const y = h - padY - (((d[key] - minV) / span) * (h - padY * 2));
+      return { x, y, val: d[key], label: d.short };
+    });
+
+  const makePath = (pts) => pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+
+  const series = [
+    { key: 'grossProfitMargin', name: 'Gross Margin %', color: '#2563eb' },
+    { key: 'netProfitMargin', name: 'Net Margin %', color: '#059669' },
+    { key: 'roe', name: 'ROE %', color: '#7c3aed' }
+  ];
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h4 className="text-xs font-bold text-slate-800">Tren Rasio Profitabilitas (%)</h4>
+          <p className="text-[11px] text-slate-400">Gross Margin, Net Margin, dan ROE per Kuartal</p>
+        </div>
+        <div className="flex items-center gap-3 text-[10px] font-semibold">
+          {series.map(s => (
+            <span key={s.key} className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: s.color }} />
+              {s.name}
+            </span>
+          ))}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${w} ${h + 20}`} className="w-full h-44 overflow-visible">
+        {[0, 0.5, 1].map((t, idx) => {
+          const y = h - padY - t * (h - padY * 2);
+          const v = minV + t * span;
+          return (
+            <g key={idx}>
+              <line x1={padX} x2={w - padX} y1={y} y2={y} stroke="#e2e8f0" strokeDasharray="3 3" />
+              <text x={padX - 6} y={y + 3} textAnchor="end" fontSize="9" fill="#64748b">{v.toFixed(0)}%</text>
+            </g>
+          );
+        })}
+        {series.map(s => {
+          const pts = toPoints(s.key);
+          return (
+            <g key={s.key}>
+              <path d={makePath(pts)} fill="none" stroke={s.color} strokeWidth="2.2" strokeLinecap="round" />
+              {pts.map(p => (
+                <circle key={p.label} cx={p.x} cy={p.y} r="3.5" fill={s.color} stroke="#fff" strokeWidth="1.2">
+                  <title>{`${s.name} (${p.label}): ${p.val.toFixed(1)}%`}</title>
+                </circle>
+              ))}
+            </g>
+          );
+        })}
+        {data.map((d, i) => {
+          const x = padX + (i * (w - padX * 2)) / Math.max(1, data.length - 1);
+          return <text key={d.short} x={x} y={h + 8} textAnchor="middle" fontSize="10" fontWeight="600" fill="#475569">{d.short}</text>;
+        })}
+      </svg>
+    </div>
+  );
+}
+
 // ─── Komponen Tab ────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'income', label: 'Laba Rugi', icon: TrendingUp },
@@ -137,6 +301,10 @@ export default function FinancialStatementsModule({ coaList = [], journalEntries
   const [endDate, setEndDate] = useState(today());
   const [asOfDate, setAsOfDate] = useState(today());
   const [priorEndDate, setPriorEndDate] = useState('');
+  const [compareMode, setCompareMode] = useState(false);
+  const [priorStartDate, setPriorStartDate] = useState(`${new Date().getFullYear() - 1}-01-01`);
+  const [priorAsOfDate, setPriorAsOfDate] = useState(`${new Date().getFullYear() - 1}-12-31`);
+  const [trendYear, setTrendYear] = useState(new Date().getFullYear());
   const [showZero, setShowZero] = useState(false);
   const [calkNotes, setCalkNotes] = useState({});
   const [expandedSections, setExpandedSections] = useState({});
@@ -152,6 +320,28 @@ export default function FinancialStatementsModule({ coaList = [], journalEntries
   const bs = useMemo(() =>
     buildBalanceSheet({ coaList, journalEntries, asOfDate }),
     [coaList, journalEntries, asOfDate]
+  );
+
+  const compIS = useMemo(() =>
+    compareMode ? buildComparativeIncomeStatement({
+      coaList, journalEntries,
+      currentStart: startDate, currentEnd: endDate,
+      priorStart: priorStartDate, priorEnd: priorEndDate || `${new Date().getFullYear() - 1}-12-31`
+    }) : null,
+    [compareMode, coaList, journalEntries, startDate, endDate, priorStartDate, priorEndDate]
+  );
+
+  const compBS = useMemo(() =>
+    compareMode ? buildComparativeBalanceSheet({
+      coaList, journalEntries,
+      currentAsOf: asOfDate, priorAsOf: priorAsOfDate
+    }) : null,
+    [compareMode, coaList, journalEntries, asOfDate, priorAsOfDate]
+  );
+
+  const quarterlyTrend = useMemo(() =>
+    buildQuarterlyTrend({ coaList, journalEntries, year: trendYear }),
+    [coaList, journalEntries, trendYear]
   );
 
   const es = useMemo(() =>
@@ -205,6 +395,20 @@ export default function FinancialStatementsModule({ coaList = [], journalEntries
           <input type="checkbox" checked={showZero} onChange={e => setShowZero(e.target.checked)} className="rounded" />
           Tampilkan saldo nol
         </label>
+        <label className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-1.5 rounded-lg cursor-pointer">
+          <input type="checkbox" checked={compareMode} onChange={e => setCompareMode(e.target.checked)} className="rounded" />
+          Bandingkan Periode
+        </label>
+        {compareMode && (
+          <div className="flex items-center gap-2 bg-indigo-50/60 px-3 py-1.5 rounded-lg border border-indigo-200">
+            <span className="text-[11px] font-semibold text-indigo-800">Pembanding:</span>
+            <input type="date" value={priorStartDate} onChange={e => setPriorStartDate(e.target.value)}
+              className="border border-indigo-200 rounded px-2 py-1 text-xs bg-white" />
+            <span className="text-xs text-indigo-500">s/d</span>
+            <input type="date" value={priorEndDate || `${new Date().getFullYear() - 1}-12-31`} onChange={e => setPriorEndDate(e.target.value)}
+              className="border border-indigo-200 rounded px-2 py-1 text-xs bg-white" />
+          </div>
+        )}
         <div className="ml-auto flex gap-2">
           <button onClick={handlePrint} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-600">
             <Printer className="w-3.5 h-3.5" /> Cetak
@@ -240,9 +444,49 @@ export default function FinancialStatementsModule({ coaList = [], journalEntries
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
               <th className="text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 pl-3">Keterangan</th>
-              <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 pr-4">Jumlah (Rp)</th>
+              {compareMode && compIS ? (
+                <>
+                  <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 pr-3">Berjalan (Rp)</th>
+                  <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 pr-3">Pembanding (Rp)</th>
+                  <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 pr-3">Selisih (Rp)</th>
+                  <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 pr-4">%</th>
+                </>
+              ) : (
+                <th className="text-right text-[11px] font-semibold text-slate-500 uppercase tracking-wider py-2.5 pr-4">Jumlah (Rp)</th>
+              )}
             </tr>
           </thead>
+          {compareMode && compIS ? (
+            <tbody>
+              <tr className="bg-blue-50/60"><td colSpan={5} className="py-2 pl-3 text-[11px] font-bold text-blue-800 uppercase tracking-wider">I. Pendapatan Usaha</td></tr>
+              {compIS.revenueRows.filter(r => showZero || r.current !== 0 || r.prior !== 0).map(r => (
+                <CompLRRow key={r.code} label={`${r.code} — ${r.name}`} v={r} indent={1} />
+              ))}
+              <CompLRRow label="Total Pendapatan Usaha" v={compIS.summary.totalRevenue} bold border highlight />
+
+              <tr className="bg-slate-50/60"><td colSpan={5} className="py-2 pl-3 text-[11px] font-bold text-slate-600 uppercase tracking-wider">II. Harga Pokok Penjualan (HPP)</td></tr>
+              {compIS.cogsRows.filter(r => showZero || r.current !== 0 || r.prior !== 0).map(r => (
+                <CompLRRow key={r.code} label={`${r.code} — ${r.name}`} v={r} indent={1} invertColor />
+              ))}
+              <CompLRRow label="Total HPP" v={compIS.summary.totalCOGS} bold invertColor />
+              <CompLRRow label="LABA KOTOR" v={compIS.summary.grossProfit} bold border highlight />
+
+              <tr className="bg-amber-50/40"><td colSpan={5} className="py-2 pl-3 text-[11px] font-bold text-amber-800 uppercase tracking-wider">III. Beban Operasional</td></tr>
+              {compIS.expenseRows.filter(r => showZero || r.current !== 0 || r.prior !== 0).map(r => (
+                <CompLRRow key={r.code} label={`${r.code} — ${r.name}`} v={r} indent={1} invertColor />
+              ))}
+              <CompLRRow label="Total Beban Operasional" v={compIS.summary.totalExpense} bold invertColor />
+              <CompLRRow label="LABA OPERASIONAL (EBIT)" v={compIS.summary.operatingProfit} bold border highlight />
+              <CompLRRow label="LABA SEBELUM PAJAK" v={compIS.summary.profitBeforeTax} bold border highlight />
+
+              <tr className={`border-t-4 border-double border-slate-400 ${compIS.current.isProfit ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                <td className="py-3 pl-3 text-sm font-black text-slate-900">✦ LABA / (RUGI) BERSIH</td>
+                <td className="py-3 pr-3 text-sm font-black text-right font-mono text-slate-900">{fmtRp(compIS.summary.netProfit.current)}</td>
+                <td className="py-3 pr-3 text-sm font-bold text-right font-mono text-slate-600">{fmtRp(compIS.summary.netProfit.prior)}</td>
+                <VarianceCell diff={compIS.summary.netProfit.diff} pct={compIS.summary.netProfit.pct} />
+              </tr>
+            </tbody>
+          ) : (
           <tbody>
             {/* PENDAPATAN */}
             <tr className="bg-blue-50/60"><td colSpan={2} className="py-2 pl-3 text-[11px] font-bold text-blue-800 uppercase tracking-wider">I. Pendapatan Usaha</td></tr>
@@ -304,6 +548,7 @@ export default function FinancialStatementsModule({ coaList = [], journalEntries
               </td>
             </tr>
           </tbody>
+          )}
         </table>
       </div>
     </div>
@@ -325,6 +570,31 @@ export default function FinancialStatementsModule({ coaList = [], journalEntries
           <input type="checkbox" checked={showZero} onChange={e => setShowZero(e.target.checked)} className="rounded" />
           Tampilkan saldo nol
         </label>
+        <label className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-1.5 rounded-lg cursor-pointer">
+          <input type="checkbox" checked={compareMode} onChange={e => setCompareMode(e.target.checked)} className="rounded" />
+          Bandingkan Tanggal
+        </label>
+        {compareMode && (
+          <div className="flex items-center gap-2 bg-indigo-50/60 px-3 py-1.5 rounded-lg border border-indigo-200">
+            <span className="text-[11px] font-semibold text-indigo-800">Pembanding:</span>
+            <input type="date" value={priorAsOfDate} onChange={e => setPriorAsOfDate(e.target.value)}
+              className="border border-indigo-200 rounded px-2 py-1 text-xs bg-white" />
+          </div>
+        )}
+        <label className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-1.5 rounded-lg cursor-pointer">
+          <input type="checkbox" checked={compareMode} onChange={e => setCompareMode(e.target.checked)} className="rounded" />
+          Bandingkan Periode
+        </label>
+        {compareMode && (
+          <div className="flex items-center gap-2 bg-indigo-50/60 px-3 py-1.5 rounded-lg border border-indigo-200">
+            <span className="text-[11px] font-semibold text-indigo-800">Pembanding:</span>
+            <input type="date" value={priorStartDate} onChange={e => setPriorStartDate(e.target.value)}
+              className="border border-indigo-200 rounded px-2 py-1 text-xs bg-white" />
+            <span className="text-xs text-indigo-500">s/d</span>
+            <input type="date" value={priorEndDate || `${new Date().getFullYear() - 1}-12-31`} onChange={e => setPriorEndDate(e.target.value)}
+              className="border border-indigo-200 rounded px-2 py-1 text-xs bg-white" />
+          </div>
+        )}
         <div className="ml-auto flex gap-2">
           <button onClick={handlePrint} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-600">
             <Printer className="w-3.5 h-3.5" /> Cetak
@@ -351,6 +621,55 @@ export default function FinancialStatementsModule({ coaList = [], journalEntries
       </div>
 
       {/* Neraca Table */}
+      {compareMode && compBS ? (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-800 text-white">
+            <h3 className="text-sm font-bold">Neraca Komparatif</h3>
+            <p className="text-[11px] text-slate-300">Per {asOfDate} vs {priorAsOfDate}</p>
+          </div>
+          <table className="w-full">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="text-left text-[11px] font-semibold text-slate-500 uppercase py-2.5 pl-3">Akun</th>
+                <th className="text-right text-[11px] font-semibold text-slate-500 uppercase py-2.5 pr-3">{asOfDate}</th>
+                <th className="text-right text-[11px] font-semibold text-slate-500 uppercase py-2.5 pr-3">{priorAsOfDate}</th>
+                <th className="text-right text-[11px] font-semibold text-slate-500 uppercase py-2.5 pr-3">Selisih (Rp)</th>
+                <th className="text-right text-[11px] font-semibold text-slate-500 uppercase py-2.5 pr-4">%</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="bg-blue-50/70"><td colSpan={5} className="py-2 pl-3 text-[11px] font-bold text-blue-800 uppercase">Aset Lancar</td></tr>
+              {compBS.currentAssetRows.filter(r => showZero || r.current !== 0 || r.prior !== 0).map(r => (
+                <CompLRRow key={r.code} label={`${r.code} — ${r.name}`} v={r} indent={1} />
+              ))}
+              <CompLRRow label="Total Aset Lancar" v={compBS.summary.totalCurrentAssets} bold highlight />
+
+              <tr className="bg-blue-50/70"><td colSpan={5} className="py-2 pl-3 text-[11px] font-bold text-blue-800 uppercase">Aset Tidak Lancar / Tetap</td></tr>
+              {compBS.fixedAssetRows.filter(r => showZero || r.current !== 0 || r.prior !== 0).map(r => (
+                <CompLRRow key={r.code} label={`${r.code} — ${r.name}`} v={r} indent={1} />
+              ))}
+              <CompLRRow label="Total Aset Tetap" v={compBS.summary.totalFixedAssets} bold highlight />
+              <CompLRRow label="TOTAL ASET" v={compBS.summary.totalAssets} bold border highlight />
+
+              <tr className="bg-amber-50/70"><td colSpan={5} className="py-2 pl-3 text-[11px] font-bold text-amber-800 uppercase">Kewajiban</td></tr>
+              {compBS.currentLiabilityRows.filter(r => showZero || r.current !== 0 || r.prior !== 0).map(r => (
+                <CompLRRow key={r.code} label={`${r.code} — ${r.name}`} v={r} indent={1} invertColor />
+              ))}
+              {compBS.longTermLiabilityRows.filter(r => showZero || r.current !== 0 || r.prior !== 0).map(r => (
+                <CompLRRow key={r.code} label={`${r.code} — ${r.name}`} v={r} indent={1} invertColor />
+              ))}
+              <CompLRRow label="TOTAL KEWAJIBAN" v={compBS.summary.totalLiabilities} bold highlight invertColor />
+
+              <tr className="bg-emerald-50/70"><td colSpan={5} className="py-2 pl-3 text-[11px] font-bold text-emerald-800 uppercase">Ekuitas</td></tr>
+              {compBS.equityRows.filter(r => showZero || r.current !== 0 || r.prior !== 0).map(r => (
+                <CompLRRow key={r.code} label={`${r.code} — ${r.name}`} v={r} indent={1} />
+              ))}
+              <CompLRRow label="TOTAL EKUITAS" v={compBS.summary.totalEquity} bold highlight />
+              <CompLRRow label="TOTAL KEWAJIBAN & EKUITAS" v={compBS.summary.totalLiabilitiesAndEquity} bold border highlight />
+            </tbody>
+          </table>
+        </div>
+      ) : (
       <div className="grid md:grid-cols-2 gap-4">
         {/* ASET */}
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -415,6 +734,7 @@ export default function FinancialStatementsModule({ coaList = [], journalEntries
           </table>
         </div>
       </div>
+      )}
     </div>
   );
 
@@ -729,6 +1049,29 @@ export default function FinancialStatementsModule({ coaList = [], journalEntries
                 interpretation={ratios.cashConversionCycle !== null ? (ratios.cashConversionCycle < 30 ? 'Efisien' : 'Perhatian') : '-'} />
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Grafik Tren Kuartalan */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between bg-white rounded-xl border border-slate-200 px-4 py-3">
+          <div>
+            <h4 className="text-xs font-bold text-slate-800">Grafik Tren Kuartalan (Q1–Q4)</h4>
+            <p className="text-[11px] text-slate-400">Visualisasi kinerja pendapatan, laba, dan margin rasio per kuartal</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-500">Tahun:</label>
+            <input
+              type="number"
+              value={trendYear}
+              onChange={e => setTrendYear(Number(e.target.value) || new Date().getFullYear())}
+              className="w-20 border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-700"
+            />
+          </div>
+        </div>
+        <div className="grid md:grid-cols-2 gap-4">
+          <QuarterlyBarChart data={quarterlyTrend} />
+          <RatioTrendChart data={quarterlyTrend} />
         </div>
       </div>
 
